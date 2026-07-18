@@ -129,7 +129,7 @@
 
   <section class="card">
     <div class="card-head">
-      <h2>参加者全員の活動状況（積層横棒）</h2>
+      <h2>DHUmember全員の活動状況（積層横棒・「閲覧権限」ロール保持者）</h2>
       <span class="hint">1行＝1メンバー。バーにマウスを載せると拡大表示され、ユーザー名と各指標の値が出ます。</span>
     </div>
     <div id="legend" class="legend"></div>
@@ -219,10 +219,9 @@ async function main() {
   const defs = m.metric_defs || {};
   const palette = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6"].map(cssVar);
   const colorOf = (k) => palette[keys.indexOf(k) % palette.length];
-  const vcAvailable = !!m.vc_available;
 
   // 値の単位（ツールチップ表示用）
-  const unitOf = { chars: "字", posts: "件", mentions_out: "回", mentions_in: "回", vc_min: "分", event_interest: "件" };
+  const unitOf = { chars: "字", posts: "件", mentions_out: "回", mentions_in: "回", event_interest: "件" };
 
   // 正規化: 指標ごとに全メンバー中の最大値で 0〜1 に割る。
   // バーの長さ＝正規化値の合計（＝どの指標も同じ重みの総合スコア）。
@@ -241,7 +240,7 @@ async function main() {
     const def = (defs[k] || "").replace(/"/g, "&quot;");
     return `<span class="item" data-label="${labels[k]}" data-def="${def}" tabindex="0">
       <span class="sw" style="background:${colorOf(k)}"></span>
-      <span class="name">${labels[k]}${k === "vc_min" && !vcAvailable ? "（記録なし）" : ""}</span>
+      <span class="name">${labels[k]}</span>
       <span class="q" aria-hidden="true">?</span>
     </span>`;
   }).join("");
@@ -339,9 +338,7 @@ async function main() {
 
   function rowTip(r, i, x, y) {
     const lines = keys.map((k, j) => {
-      let v;
-      if (k === "vc_min" && !vcAvailable) v = "—（記録なし）";
-      else v = fmt(r[k] ?? 0) + (unitOf[k] || "");
+      const v = fmt(r[k] ?? 0) + (unitOf[k] || "");
       return `<tr><td><span class="tsw" style="background:${palette[j % palette.length]}"></span>${labels[k]}</td><td>${v}</td></tr>`;
     }).join("");
     tip.innerHTML = `<div class="tip-h">${r.name}</div>
@@ -366,15 +363,11 @@ async function main() {
 
   // 注記
   const notes = [
+    `対象は「${m.view_role_name || "閲覧権限"}」ロールを持つメンバーです（Bot・Administratorロール保持者を除く）。`,
     "バーの長さは、各指標を全メンバー中の最大値で正規化（0〜1）して積み上げた総合スコアです（指標間の単位の違いを吸収するため）。",
     "並び順は総合スコアの高い順です。",
+    "「イベントへの興味」は現在登録されているイベントが対象です（終了・削除済みイベントはDiscord APIから取得できません）。",
   ];
-  if (vcAvailable) {
-    notes.push(`VC参加時間は${m.vc_interval_min}分間隔の定期スナップショットからの概算です（短時間の参加は取りこぼすことがあり、記録開始以降のみ集計）。`);
-  } else {
-    notes.push("VC参加時間はまだ記録がありません。VCスナップショットのワークフローが動き始めると集計されます。");
-  }
-  notes.push("「イベントへの興味」は現在登録されているイベントが対象です（終了・削除済みイベントはDiscord APIから取得できません）。");
   document.getElementById("notes").innerHTML = notes.map(n => "※ " + n).join("<br>");
 
   const gen = new Date(data.generated_at);

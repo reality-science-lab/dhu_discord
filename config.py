@@ -54,10 +54,3 @@ class Config:
     member_activity_days: int = field(
         default_factory=lambda: int(os.environ.get("MEMBER_ACTIVITY_DAYS", "7"))
     )
-    # VCスナップショットの履歴CSV（vc_snapshot.py が追記）
-    vc_csv_path: str = field(default_factory=lambda: os.environ.get("VC_CSV_PATH", "vc_history.csv"))
-    # VCスナップショットの実行間隔（分）。概算参加時間 = 在室スナップショット数 × この値。
-    # .github/workflows/vc-snapshot.yml の cron と合わせること。
-    vc_snapshot_interval_min: int = field(
-        default_factory=lambda: int(os.environ.get("VC_SNAPSHOT_INTERVAL_MIN", "15"))
-    )

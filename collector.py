@@ -27,7 +27,10 @@ class DailyMetric:
 
 @dataclass
 class MemberStats:
-    """メンバー別ダッシュボード用の個人別集計（直近N日）。"""
+    """メンバー別ダッシュボード用の個人別集計（直近N日）。
+
+    対象は「閲覧権限」ロールを持つメンバー（Bot と Administrator ロール保持者を除く）。
+    """
 
     name: str
     chars: int = 0  # 発言文字数
@@ -181,8 +184,13 @@ async def _collect_with_client(
             data.view_role_member_count += 1
         if member.joined_at and since <= member.joined_at <= until:
             new_members_by_day[_day_key(member.joined_at, tz)] += 1
-        # メンバー別ダッシュボード: Botを除く在籍メンバー全員を（活動ゼロでも）載せる
-        if not member.bot:
+        # メンバー別ダッシュボード: 「閲覧権限」ロール保持者を（活動ゼロでも）載せる。
+        # Bot と Administrator ロール保持者（運営）は対象外。
+        if (
+            not member.bot
+            and config.view_role_name in role_names
+            and config.admin_role_name not in role_names
+        ):
             data.member_stats[member.id] = MemberStats(name=member.display_name)
 
     # 「閲覧権限」ロール付与数（監査ログ・日別のユニークユーザー）＝DHUmember数

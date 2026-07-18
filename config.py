@@ -50,3 +50,7 @@ class Config:
     activity_csv_path: str = field(
         default_factory=lambda: os.environ.get("ACTIVITY_CSV_PATH", "activity_history.csv")
     )
+    # メンバー別ダッシュボードの集計単位日数（直近N日）
+    member_activity_days: int = field(
+        default_factory=lambda: int(os.environ.get("MEMBER_ACTIVITY_DAYS", "7"))
+    )

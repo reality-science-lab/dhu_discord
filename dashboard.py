@@ -1,8 +1,9 @@
 """ダッシュボード用のデータを書き出す。
 
-個人情報は出さない: メンバー名・発言本文は含めず、集計値（指標の推移、
-チャンネル別の件数、イベントの状態）のみをエクスポートする。週報本文を
-含める場合は、必ずパスワードで暗号化した ``docs/data.enc`` にのみ格納する。
+発言本文は含めない。メンバー名を含むメンバー別集計と週報本文は、
+パスワードで暗号化した ``docs/data.enc`` にのみ格納する（CI では
+DASHBOARD_PASSWORD が必須のため平文で公開されることはない。パスワード
+未設定の平文 ``data.json`` はローカル開発専用で、コミットしない）。
 """
 
 import base64
@@ -64,6 +65,63 @@ def _kpis(history: pd.DataFrame, last_day) -> list[dict]:
             }
         )
     return kpis
+
+
+MEMBER_METRIC_KEYS = ["chars", "posts", "mentions_out", "mentions_in", "event_interest"]
+
+MEMBER_METRIC_LABELS_JA = {
+    "chars": "発言文字数",
+    "posts": "投稿数",
+    "mentions_out": "メンション数",
+    "mentions_in": "被メンション数",
+    "event_interest": "イベントへの興味",
+}
+
+MEMBER_METRIC_DEFS_JA = {
+    "chars": "集計期間中に対象テキストチャンネル・スレッドへ投稿したメッセージの合計文字数。",
+    "posts": "集計期間中の投稿メッセージ数。",
+    "mentions_out": "本人の投稿に含まれる他ユーザーへの@メンションの合計数。",
+    "mentions_in": "他のメンバーの投稿で@メンションされた回数。",
+    "event_interest": (
+        "サーバーのスケジュールイベントに「興味あり」を付けた数。終了・削除済みイベントは"
+        "Discord APIから消えるため、現在登録されているイベントのみが対象。"
+    ),
+}
+
+
+def _members_payload(config: Config, data: CollectedData) -> dict:
+    """メンバー別ダッシュボード用データ。名前を含むため暗号化データにのみ入れる前提。
+
+    対象は「閲覧権限」ロール保持者（Bot・Administrator を除く）。collector 側で絞り込み済み。
+    """
+    tz = config.timezone
+    window_start = data.member_window_start or data.period_start
+    window_end = data.period_end
+
+    rows = [
+        {
+            "name": st.name,
+            "chars": st.chars,
+            "posts": st.posts,
+            "mentions_out": st.mentions_out,
+            "mentions_in": st.mentions_in,
+            "event_interest": st.event_interest,
+        }
+        for st in data.member_stats.values()
+    ]
+
+    return {
+        "window_days": config.member_activity_days,
+        "window": {
+            "start": window_start.astimezone(tz).date().isoformat(),
+            "end": (window_end - timedelta(microseconds=1)).astimezone(tz).date().isoformat(),
+        },
+        "view_role_name": config.view_role_name,
+        "metric_keys": MEMBER_METRIC_KEYS,
+        "metric_labels": MEMBER_METRIC_LABELS_JA,
+        "metric_defs": MEMBER_METRIC_DEFS_JA,
+        "rows": rows,
+    }
 
 
 def _activity_payload(activity: pd.DataFrame | None) -> dict:
@@ -211,6 +269,8 @@ def write_dashboard_data(
         "activity": _activity_payload(activity),
         "activity_defaults": [{"kind": "channel", "name": c["name"]} for c in channels_top],
         "events": events,
+        # メンバー別ダッシュボード（docs/members.html）。名前を含むため暗号化前提。
+        "members": _members_payload(config, data),
         # 現在時点のスナップショット（総数）。「閲覧権限」ロールは DHUmember として表記する。
         "totals": {
             "member_count": data.total_member_count,

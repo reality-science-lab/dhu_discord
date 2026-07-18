@@ -78,7 +78,13 @@ def main() -> None:
     tz = config.timezone
     since, until, analysis_since = _resolve_period(config, args)
 
-    data = run_collect(config, since, until, analysis_since)
+    # メンバー別ダッシュボードの集計窓（直近N日、日単位で丸める）
+    member_last_day = (until - timedelta(microseconds=1)).astimezone(tz).date()
+    member_since = datetime.combine(
+        member_last_day - timedelta(days=config.member_activity_days - 1), time.min, tzinfo=tz
+    )
+
+    data = run_collect(config, since, until, analysis_since, member_since)
 
     history = append_metrics(config, data)
     activity = append_activity(config, data)
@@ -102,6 +108,10 @@ def main() -> None:
     )
     print(f"集計期間（指標）: {first_day} 〜 {last_day}")
     print(f"分析起点（チャンネル/イベント）: {analysis_since.astimezone(tz):%Y-%m-%d %H:%M}")
+    print(
+        f"メンバー別集計: {member_since.astimezone(tz).date()} 〜 {last_day}"
+        f"（{config.member_activity_days}日間・{len(data.member_stats)}人）"
+    )
     print(f"指標CSVを更新しました: {config.metrics_csv_path}（{len(data.daily_metrics)}日分）")
     print(f"グラフを更新しました: {config.metrics_graph_path}")
     print(f"盛り上がりグラフを更新しました: {config.activity_graph_path}")

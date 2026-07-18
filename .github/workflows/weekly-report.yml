@@ -24,6 +24,10 @@ on:
         required: false
         type: boolean
         default: false
+      member_days:
+        description: "メンバー別ダッシュボードの集計単位日数（省略時は7日）"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -66,6 +70,7 @@ jobs:
           EXCLUDE_CHANNEL_IDS: ${{ vars.EXCLUDE_CHANNEL_IDS }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
           TIMEZONE: Asia/Tokyo
+          MEMBER_ACTIVITY_DAYS: ${{ inputs.member_days || '7' }}
         run: |
           python main.py --weekly \
             ${{ inputs.since && format('--since {0}', inputs.since) || '' }} \

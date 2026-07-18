@@ -72,18 +72,6 @@ jobs:
             ${{ inputs.until && format('--until {0}', inputs.until) || '' }} \
             ${{ inputs.skip_report == true && '--skip-report' || '' }}
 
-      - name: Render report to run summary
-        if: ${{ inputs.skip_report != true }}
-        run: |
-          weekly=$(ls -t reports/*_weekly.md 2>/dev/null | head -1)
-          if [ -n "$weekly" ]; then
-            {
-              echo "## 📋 週報（$(basename "$weekly")）"
-              echo ""
-              cat "$weekly"
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Commit updated metrics and dashboard
         run: |
           git config user.name "github-actions[bot]"
@@ -96,11 +84,3 @@ jobs:
             git commit -m "Update community metrics and dashboard (weekly report run)"
             git push origin "HEAD:${{ github.ref_name }}"
           fi
-
-      - name: Upload reports
-        if: ${{ inputs.skip_report != true }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: weekly-report
-          path: reports/
-          if-no-files-found: ignore

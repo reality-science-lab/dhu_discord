@@ -36,6 +36,7 @@ class Config:
     timezone: ZoneInfo = field(default_factory=lambda: ZoneInfo(os.environ.get("TIMEZONE", "Asia/Tokyo")))
     haiku_model: str = field(default_factory=lambda: os.environ.get("HAIKU_MODEL", "claude-haiku-4-5-20251001"))
     sonnet_model: str = field(default_factory=lambda: os.environ.get("SONNET_MODEL", "claude-sonnet-5"))
+    # 旧運用との互換用。週報本文はここへ書き出さず、暗号化ダッシュボードにのみ格納する。
     output_dir: str = field(default_factory=lambda: os.environ.get("OUTPUT_DIR", "reports"))
     metrics_csv_path: str = field(default_factory=lambda: os.environ.get("METRICS_CSV_PATH", "metrics_history.csv"))
     metrics_graph_path: str = field(

@@ -1,5 +1,4 @@
 import argparse
-import os
 from datetime import date, datetime, time, timedelta
 
 from anthropic import Anthropic
@@ -85,10 +84,22 @@ def main() -> None:
     activity = append_activity(config, data)
     render_graph(config, history)
     render_activity_graph(config, data)
-    dashboard_path = write_dashboard_data(config, data, history, activity)
 
     first_day = since.astimezone(tz).date()
     last_day = (until - timedelta(microseconds=1)).astimezone(tz).date()
+
+    weekly_report = None
+    if not args.skip_report:
+        client = Anthropic(api_key=config.anthropic_api_key)
+        weekly_report = generate_weekly_report(client, config, data, history)
+
+    dashboard_path = write_dashboard_data(
+        config,
+        data,
+        history,
+        activity,
+        weekly_report=weekly_report,
+    )
     print(f"集計期間（指標）: {first_day} 〜 {last_day}")
     print(f"分析起点（チャンネル/イベント）: {analysis_since.astimezone(tz):%Y-%m-%d %H:%M}")
     print(f"指標CSVを更新しました: {config.metrics_csv_path}（{len(data.daily_metrics)}日分）")
@@ -101,17 +112,7 @@ def main() -> None:
         print("--skip-report が指定されたため、レポート生成をスキップしました。")
         return
 
-    client = Anthropic(api_key=config.anthropic_api_key)
-    weekly_report = generate_weekly_report(client, config, data, history)
-
-    os.makedirs(config.output_dir, exist_ok=True)
-    date_str = last_day.strftime("%Y-%m-%d")
-    weekly_path = os.path.join(config.output_dir, f"{date_str}_weekly.md")
-
-    with open(weekly_path, "w", encoding="utf-8") as f:
-        f.write(weekly_report)
-
-    print(f"週報を出力しました: {weekly_path}")
+    print("週報を暗号化ダッシュボードに反映しました。")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
-"""公開ダッシュボード用のデータ（docs/data.json）を書き出す。
+"""ダッシュボード用のデータを書き出す。
 
 個人情報は出さない: メンバー名・発言本文は含めず、集計値（指標の推移、
-チャンネル別の件数、イベントの状態）のみをエクスポートする。
+チャンネル別の件数、イベントの状態）のみをエクスポートする。週報本文を
+含める場合は、必ずパスワードで暗号化した ``docs/data.enc`` にのみ格納する。
 """
 
 import base64
@@ -122,8 +123,37 @@ def _write_encrypted(payload: dict, password: str, path: str) -> None:
         json.dump(envelope, f)
 
 
+def _read_encrypted(path: str, password: str) -> dict | None:
+    """既存の暗号化 payload を読む。復号できない場合は古いデータを引き継がない。"""
+    if not os.path.exists(path):
+        return None
+
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            envelope = json.load(f)
+        b64 = lambda value: base64.b64decode(value)  # noqa: E731
+        key = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            b64(envelope["salt"]),
+            int(envelope["iter"]),
+            dklen=32,
+        )
+        raw = AESGCM(key).decrypt(b64(envelope["iv"]), b64(envelope["ct"]), None)
+        return json.loads(raw.decode("utf-8"))
+    except (InvalidTag, KeyError, ValueError, TypeError, OSError, json.JSONDecodeError):
+        return None
+
+
 def write_dashboard_data(
-    config: Config, data: CollectedData, history: pd.DataFrame, activity: pd.DataFrame | None = None
+    config: Config,
+    data: CollectedData,
+    history: pd.DataFrame,
+    activity: pd.DataFrame | None = None,
+    weekly_report: str | None = None,
 ) -> str:
     tz = config.timezone
     os.makedirs(DOCS_DIR, exist_ok=True)
@@ -195,6 +225,22 @@ def write_dashboard_data(
     enc_path = os.path.join(DOCS_DIR, ENC_FILENAME)
 
     password = os.environ.get("DASHBOARD_PASSWORD", "")
+    if weekly_report and not password:
+        raise RuntimeError(
+            "週報本文を平文公開しないため、DASHBOARD_PASSWORD の設定が必要です。"
+        )
+
+    # 指標だけを更新する実行では、直前の週報を消さずに引き継ぐ。
+    previous = _read_encrypted(enc_path, password) if password else None
+    if weekly_report:
+        payload["weekly_report"] = {
+            "period": {"start": first_day.isoformat(), "end": last_day.isoformat()},
+            "generated_at": data.period_end.astimezone(tz).isoformat(),
+            "markdown": weekly_report,
+        }
+    elif previous and previous.get("weekly_report"):
+        payload["weekly_report"] = previous["weekly_report"]
+
     if password:
         # パスワード運用時: 暗号化データのみを配信し、平文は削除する
         _write_encrypted(payload, password, enc_path)

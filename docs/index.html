@@ -103,6 +103,14 @@
   .k-delta .up { color: var(--good); }
   .k-delta .down { color: var(--bad); }
 
+  .report-meta { color: var(--text-secondary); font-size: 12px; margin: -4px 0 10px; }
+  .report-body {
+    margin: 0; padding: 16px; max-height: 560px; overflow: auto;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    border: 1px solid var(--grid); border-radius: 8px; background: var(--page);
+    color: var(--text-primary); font: 13px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
   .card {
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px 18px; margin-bottom: 16px;
@@ -200,7 +208,6 @@
       <div class="sub" id="period">読み込み中…</div>
     </div>
     <div class="actions">
-      <a class="btn primary" id="genBtn" href="#" target="_blank" rel="noopener">▶ 週報を生成</a>
       <a class="btn" id="runsBtn" href="#" target="_blank" rel="noopener">実行結果を見る</a>
     </div>
   </header>
@@ -209,6 +216,15 @@
 
   <h3 class="section-h">週次の動き（直近1週間・前週比）</h3>
   <section class="kpis" id="kpis"></section>
+
+  <section class="card" id="reportCard">
+    <div class="card-head">
+      <h2>最新の週報</h2>
+      <button class="btn primary" id="copyReportBtn" type="button">Markdownをコピー</button>
+    </div>
+    <div class="report-meta" id="reportMeta"></div>
+    <pre class="report-body" id="reportBody"></pre>
+  </section>
 
   <section class="card">
     <div class="card-head">
@@ -252,7 +268,7 @@
   </section>
 
   <footer id="footer"></footer>
-  <div class="privacy">※ 個人情報保護のため、メンバー名・発言内容はこのダッシュボードには表示していません（集計値のみ）。週報本文は実行結果ページ／Artifactで限定閲覧できます。</div>
+  <div class="privacy">※ ダッシュボードデータと週報本文は暗号化され、閲覧パスワードを知る人だけが表示できます。週報本文は Actions のサマリーや Artifact には保存しません。</div>
 </div>
 <div id="tip" class="tip hidden" role="tooltip"></div>
 <div id="lock" class="lock hidden">
@@ -354,8 +370,35 @@ async function main() {
 
   document.getElementById("period").textContent =
     `対象期間: ${data.period.start} 〜 ${data.period.end}（直近1週間）`;
-  document.getElementById("genBtn").href = data.workflow_url;
   document.getElementById("runsBtn").href = data.actions_url;
+
+  // 最新週報（Markdownをそのまま安全に表示し、ワンクリックでコピー）
+  const report = data.weekly_report;
+  const reportCard = document.getElementById("reportCard");
+  const copyReportBtn = document.getElementById("copyReportBtn");
+  if (report && report.markdown) {
+    document.getElementById("reportMeta").textContent =
+      `対象期間: ${report.period.start} 〜 ${report.period.end}`;
+    document.getElementById("reportBody").textContent = report.markdown;
+    copyReportBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(report.markdown);
+      } catch (e) {
+        const area = document.createElement("textarea");
+        area.value = report.markdown;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+      copyReportBtn.textContent = "コピーしました";
+      setTimeout(() => { copyReportBtn.textContent = "Markdownをコピー"; }, 1800);
+    });
+  } else {
+    reportCard.classList.add("hidden");
+  }
 
   // 現在の総数（スナップショット）
   const t = data.totals || {};

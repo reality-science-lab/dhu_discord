@@ -9,11 +9,6 @@ name: Weekly community report
 #   - (任意) Variables: EXCLUDE_CHANNEL_IDS
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/weekly-report.yml'
   workflow_dispatch:
     inputs:
       since:

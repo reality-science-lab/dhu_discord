@@ -183,7 +183,7 @@ def generate_weekly_report(
 
     message = client.messages.create(
         model=config.sonnet_model,
-        max_tokens=2500,
+        max_tokens=5000,
         messages=[{"role": "user", "content": prompt}],
     )
     return _extract_text(message)

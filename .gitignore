@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+reports/
+
+# metrics_history.csv と metrics_graph.png は永続的な指標の蓄積として
+# リポジトリで追跡する（GitHub Actions が毎日更新してコミットする）。

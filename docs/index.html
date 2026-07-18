@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHW コミュニティ ダッシュボード</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --good: #006300;
+    --bad: #c0322f;
+    --series-1: #2a78d6; /* blue */
+    --series-2: #1baf7a; /* aqua */
+    --series-3: #eda100; /* yellow */
+    --series-4: #008300; /* green */
+    --series-5: #4a3aa7; /* violet */
+    --series-6: #e34948; /* red */
+    --series-7: #e87ba4; /* magenta */
+    --series-8: #eb6834; /* orange */
+    --status-scheduled: #2a78d6;
+    --status-active: #0ca30c;
+    --status-ended: #898781;
+    --status-cancelled: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --good: #0ca30c;
+      --bad: #e66767;
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --series-3: #c98500;
+      --series-4: #008300;
+      --series-5: #9085e9;
+      --series-6: #e66767;
+      --series-7: #d55181;
+      --series-8: #d95926;
+      --status-scheduled: #3987e5;
+      --status-active: #0ca30c;
+      --status-ended: #898781;
+      --status-cancelled: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin-bottom: 20px; }
+  header .titles { flex: 1 1 auto; min-width: 240px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: var(--text-secondary); font-size: 13px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; text-decoration: none;
+    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border);
+    color: var(--text-primary); background: var(--surface-1);
+  }
+  .btn.primary { background: var(--series-1); color: #fff; border-color: transparent; }
+  .btn:hover { filter: brightness(1.04); }
+
+  .section-h { font-size: 13px; color: var(--text-secondary); font-weight: 600; margin: 4px 0 8px; }
+
+  .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  @media (max-width: 640px) { .totals { grid-template-columns: 1fr; } }
+  .total-tile {
+    background: var(--series-1); color: #fff; border-radius: 12px; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .total-tile.alt { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); }
+  .total-tile .t-label { font-size: 12px; opacity: .85; }
+  .total-tile .t-value { font-size: 32px; font-weight: 700; line-height: 1.15; }
+  .total-tile .t-note { font-size: 11px; opacity: .8; }
+
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 720px) { .kpis { grid-template-columns: 1fr; } }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .tile .k-label { font-size: 12px; color: var(--text-secondary); }
+  .tile .k-value { font-size: 30px; font-weight: 650; margin: 4px 0 2px; }
+  .tile .k-delta { font-size: 12px; color: var(--muted); }
+  .k-delta .up { color: var(--good); }
+  .k-delta .down { color: var(--bad); }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px; margin-bottom: 16px;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  h2 { font-size: 15px; margin: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    font: inherit; font-size: 12px; padding: 5px 12px; border: 0; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary);
+  }
+  .seg button.on { background: var(--series-1); color: #fff; }
+
+  .chart-box { position: relative; height: 340px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; margin: 2px 0 10px; }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+  .legend .item .sw { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .legend .item .q { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 50%; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; }
+  .legend .item.off { opacity: .45; }
+  .legend .item.off .name { text-decoration: line-through; }
+  .tip { position: fixed; z-index: 50; max-width: 300px; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; font-size: 12px; line-height: 1.55; box-shadow: 0 6px 20px rgba(0,0,0,.18); pointer-events: none; }
+  .tip .tip-h { font-weight: 700; margin-bottom: 3px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--text-secondary); font-weight: 600; }
+
+  .chart-box-sm { position: relative; }
+
+  .lock {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--page);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lock-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px 30px; width: min(360px, 90vw);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .lock-card h2 { font-size: 17px; margin: 0; }
+  .lock-card p { margin: 0; font-size: 13px; color: var(--text-secondary); }
+  .lock-card input {
+    font: inherit; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--page); color: var(--text-primary);
+  }
+  .lock-card .btn { justify-content: center; cursor: pointer; border: 0; font: inherit; }
+  .lock-err { font-size: 12px; color: var(--bad); }
+
+  .dd { position: relative; }
+  .dd-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+    min-width: 280px; max-height: 320px; overflow-y: auto;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.16); padding: 6px;
+  }
+  .dd-group { font-size: 11px; font-weight: 700; color: var(--muted); padding: 8px 10px 4px; }
+  .dd-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+  .dd-item:hover { background: var(--page); }
+  .dd-item input { accent-color: var(--series-1); }
+  .dd-item.disabled { opacity: .4; cursor: not-allowed; }
+  .dd-item .sw { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; background: transparent; border: 1px solid var(--border); }
+  .dd-item .sw.on { border: 0; }
+  .dd-item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-note { font-size: 11px; color: var(--muted); padding: 6px 10px; border-top: 1px solid var(--grid); margin-top: 4px; }
+
+  ul.events { list-style: none; margin: 0; padding: 0; }
+  ul.events li { padding: 10px 0; border-bottom: 1px solid var(--grid); }
+  ul.events li:last-child { border-bottom: 0; }
+  .ev-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ev-name { font-weight: 600; font-size: 14px; }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+  .badge::before { content: "● "; }
+  .badge.scheduled { color: var(--status-scheduled); }
+  .badge.active { color: var(--status-active); }
+  .badge.ended { color: var(--status-ended); }
+  .badge.cancelled { color: var(--status-cancelled); }
+  .ev-meta { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+  .new-chip { font-size: 10px; font-weight: 700; color: var(--series-1); border: 1px solid var(--border); border-radius: 999px; padding: 1px 6px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .privacy { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="titles">
+      <h1>DHW コミュニティ ダッシュボード</h1>
+      <div class="sub" id="period">読み込み中…</div>
+    </div>
+    <div class="actions">
+      <a class="btn primary" id="genBtn" href="#" target="_blank" rel="noopener">▶ 週報を生成</a>
+      <a class="btn" id="runsBtn" href="#" target="_blank" rel="noopener">実行結果を見る</a>
+    </div>
+  </header>
+
+  <section class="totals" id="totals"></section>
+
+  <h3 class="section-h">週次の動き（直近1週間・前週比）</h3>
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>指標の推移</h2>
+      <div class="seg" role="tablist">
+        <button id="tabChart" class="on" type="button">グラフ</button>
+        <button id="tabTable" type="button">表</button>
+      </div>
+    </div>
+    <div id="legend" class="legend"></div>
+    <div class="chart-box" id="chartBox"><canvas id="trend"></canvas></div>
+    <div id="tableBox" class="hidden"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>盛り上がりの推移（チャンネル・スレッド別 投稿数/日）</h2>
+      <div class="dd">
+        <button id="actBtn" class="btn" type="button">表示する項目 ▾</button>
+        <div id="actMenu" class="dd-menu hidden"></div>
+      </div>
+    </div>
+    <div class="chart-box" id="actBox"><canvas id="actChart"></canvas></div>
+    <div id="actEmpty" class="empty hidden"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>チャンネル・掲示板の盛り上がり（直近1週間・公開チャンネルのみ）</h2>
+      <div id="channels"></div>
+    </section>
+    <section class="card">
+      <h2>スレッドの盛り上がり（直近1週間・公開チャンネルのみ）</h2>
+      <div id="threads"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>イベント</h2>
+    <ul class="events" id="events"></ul>
+  </section>
+
+  <footer id="footer"></footer>
+  <div class="privacy">※ 個人情報保護のため、メンバー名・発言内容はこのダッシュボードには表示していません（集計値のみ）。週報本文は実行結果ページ／Artifactで限定閲覧できます。</div>
+</div>
+<div id="tip" class="tip hidden" role="tooltip"></div>
+<div id="lock" class="lock hidden">
+  <form class="lock-card" id="lockForm">
+    <h2>🔒 DHW コミュニティ ダッシュボード</h2>
+    <p>閲覧にはパスワードが必要です。</p>
+    <input type="password" id="lockPw" placeholder="パスワード" autocomplete="current-password" autofocus>
+    <button class="btn primary" type="submit">開く</button>
+    <div id="lockErr" class="lock-err hidden">パスワードが違います。</div>
+  </form>
+</div>
+
+<script src="./vendor/chart.umd.js"></script>
+<script>
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (n) => new Intl.NumberFormat("ja-JP").format(n);
+
+function statusClass(s) {
+  if (s.includes("開催予定")) return "scheduled";
+  if (s.includes("開催中")) return "active";
+  if (s.includes("中止")) return "cancelled";
+  return "ended";
+}
+
+// グラフ系列の終点に値ラベルを描く（色覚多様性への二次エンコード＝直接ラベル）
+const endLabelPlugin = {
+  id: "endLabel",
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = "600 11px system-ui, sans-serif";
+    chart.data.datasets.forEach((ds, i) => {
+      const meta = chart.getDatasetMeta(i);
+      if (meta.hidden || !meta.data.length) return;
+      const pt = meta.data[meta.data.length - 1];
+      const val = ds.data[ds.data.length - 1];
+      const text = fmt(val);
+      const w = ctx.measureText(text).width;
+      const x = pt.x + 6, y = pt.y;
+      ctx.fillStyle = cssVar("--surface-1");
+      ctx.fillRect(x - 2, y - 8, w + 4, 16);
+      ctx.fillStyle = cssVar("--text-primary");
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, x, y);
+    });
+    ctx.restore();
+  }
+};
+
+// 暗号化データ（data.enc）の復号: PBKDF2-SHA256 で鍵導出 → AES-256-GCM
+async function decryptPayload(enc, password) {
+  const b64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const baseKey = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64(enc.salt), iterations: enc.iter, hash: "SHA-256" },
+    baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(enc.iv) }, key, b64(enc.ct));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+async function loadData() {
+  // 暗号化データがあればパスワードを要求。無ければ平文（ローカル開発など）へフォールバック。
+  const encRes = await fetch("./data.enc", { cache: "no-store" });
+  if (!encRes.ok) {
+    return fetch("./data.json", { cache: "no-store" }).then(r => r.json());
+  }
+  const enc = await encRes.json();
+
+  // 同一タブ内は再入力不要（sessionStorage）
+  const saved = sessionStorage.getItem("dhw_dash_pw");
+  if (saved !== null) {
+    try { return await decryptPayload(enc, saved); }
+    catch (e) { sessionStorage.removeItem("dhw_dash_pw"); }
+  }
+
+  const lock = document.getElementById("lock");
+  lock.classList.remove("hidden");
+  document.getElementById("lockPw").focus();
+  return new Promise((resolve) => {
+    document.getElementById("lockForm").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const pw = document.getElementById("lockPw").value;
+      try {
+        const d = await decryptPayload(enc, pw);
+        sessionStorage.setItem("dhw_dash_pw", pw);
+        lock.classList.add("hidden");
+        resolve(d);
+      } catch (e) {
+        document.getElementById("lockErr").classList.remove("hidden");
+        document.getElementById("lockPw").select();
+      }
+    });
+  });
+}
+
+async function main() {
+  const data = await loadData();
+
+  document.getElementById("period").textContent =
+    `対象期間: ${data.period.start} 〜 ${data.period.end}（直近1週間）`;
+  document.getElementById("genBtn").href = data.workflow_url;
+  document.getElementById("runsBtn").href = data.actions_url;
+
+  // 現在の総数（スナップショット）
+  const t = data.totals || {};
+  const num = (v) => (v == null ? "—" : fmt(v));
+  document.getElementById("totals").innerHTML = `
+    <div class="total-tile">
+      <div class="t-label">現在のメンバー総数</div>
+      <div class="t-value">${num(t.member_count)}</div>
+      <div class="t-note">サーバー在籍者の合計</div>
+    </div>
+    <div class="total-tile alt">
+      <div class="t-label">Administrator</div>
+      <div class="t-value">${num(t.admin_role_count)}</div>
+      <div class="t-note">「${t.admin_role_name || "Administrator"}」ロール保持者</div>
+    </div>
+    <div class="total-tile alt">
+      <div class="t-label">DHUmember</div>
+      <div class="t-value">${num(t.dhumember_count)}</div>
+      <div class="t-note">「閲覧権限」ロール保持者（自己紹介から自動付与）</div>
+    </div>`;
+
+  // KPI タイル
+  const kpiEl = document.getElementById("kpis");
+  kpiEl.innerHTML = data.kpis.map(k => {
+    const d = k.delta;
+    const cls = d > 0 ? "up" : d < 0 ? "down" : "";
+    const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "±";
+    return `<div class="tile">
+      <div class="k-label">${k.label}</div>
+      <div class="k-value">${fmt(k.value)}</div>
+      <div class="k-delta">前週比 <span class="${cls}">${arrow} ${fmt(Math.abs(d))}</span></div>
+    </div>`;
+  }).join("");
+
+  // 推移グラフ
+  const cols = data.metric_columns;
+  const labels = data.history.map(r => r.date);
+  const seriesColors = ["--series-1", "--series-2", "--series-3", "--series-4"].map(cssVar);
+  const datasets = cols.map((c, i) => ({
+    label: data.metric_labels[c],
+    data: data.history.map(r => r[c]),
+    borderColor: seriesColors[i],
+    backgroundColor: seriesColors[i],
+    borderWidth: 2,
+    pointRadius: 0,
+    pointHoverRadius: 5,
+    tension: 0.25,
+  }));
+
+  const chart = new Chart(document.getElementById("trend"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      layout: { padding: { right: 44 } },
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false }, // 定義ホバー付きのHTML凡例を使う
+        tooltip: { titleColor: cssVar("--text-primary"), bodyColor: cssVar("--text-primary"), backgroundColor: cssVar("--surface-1"), borderColor: cssVar("--border"), borderWidth: 1 },
+      },
+      scales: {
+        x: { grid: { color: cssVar("--grid") }, ticks: { color: cssVar("--muted"), maxRotation: 0, autoSkipPadding: 16 }, border: { color: cssVar("--baseline") } },
+        y: { beginAtZero: true, grid: { color: cssVar("--grid") }, ticks: { color: cssVar("--muted") }, border: { color: cssVar("--baseline") } },
+      },
+    },
+    plugins: [endLabelPlugin],
+  });
+
+  // 定義ホバー付きHTML凡例（クリックで系列の表示/非表示）
+  const defs = data.metric_defs || {};
+  const legendEl = document.getElementById("legend");
+  legendEl.innerHTML = cols.map((c, i) => {
+    const def = (defs[c] || "").replace(/"/g, "&quot;");
+    return `<span class="item" data-i="${i}" data-label="${data.metric_labels[c]}" data-def="${def}" tabindex="0">
+      <span class="sw" style="background:${seriesColors[i]}"></span>
+      <span class="name">${data.metric_labels[c]}</span>
+      <span class="q" aria-hidden="true">?</span>
+    </span>`;
+  }).join("");
+
+  const tip = document.getElementById("tip");
+  const showTip = (el, x, y) => {
+    const def = el.dataset.def;
+    if (!def) return;
+    tip.innerHTML = `<div class="tip-h">${el.dataset.label}</div>${def}`;
+    tip.classList.remove("hidden");
+    const w = tip.offsetWidth || 300;
+    tip.style.left = Math.min(x + 14, window.innerWidth - w - 8) + "px";
+    tip.style.top = (y + 16) + "px";
+  };
+  const hideTip = () => tip.classList.add("hidden");
+
+  legendEl.querySelectorAll(".item").forEach((el) => {
+    el.addEventListener("mouseenter", (e) => showTip(el, e.clientX, e.clientY));
+    el.addEventListener("mousemove", (e) => showTip(el, e.clientX, e.clientY));
+    el.addEventListener("mouseleave", hideTip);
+    el.addEventListener("focus", () => {
+      const r = el.getBoundingClientRect();
+      showTip(el, r.left, r.bottom);
+    });
+    el.addEventListener("blur", hideTip);
+    el.addEventListener("click", () => {
+      const i = +el.dataset.i;
+      const vis = chart.isDatasetVisible(i);
+      chart.setDatasetVisibility(i, !vis);
+      el.classList.toggle("off", vis);
+      chart.update();
+    });
+  });
+
+  // 表ビュー（コントラスト緩和＝relief。全データを表でも提供）
+  const tableBox = document.getElementById("tableBox");
+  tableBox.innerHTML = `<table><thead><tr><th>日付</th>${cols.map(c => `<th>${data.metric_labels[c]}</th>`).join("")}</tr></thead>
+    <tbody>${data.history.map(r => `<tr><td>${r.date}</td>${cols.map(c => `<td>${fmt(r[c])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+
+  const tabChart = document.getElementById("tabChart"), tabTable = document.getElementById("tabTable");
+  const chartBox = document.getElementById("chartBox");
+  tabChart.onclick = () => { tabChart.classList.add("on"); tabTable.classList.remove("on"); chartBox.classList.remove("hidden"); tableBox.classList.add("hidden"); };
+  tabTable.onclick = () => { tabTable.classList.add("on"); tabChart.classList.remove("on"); tableBox.classList.remove("hidden"); chartBox.classList.add("hidden"); };
+
+  // チャンネル/スレッドの盛り上がり: 横棒グラフ（単一系列＝青一色、凡例不要）
+  function rankBarChart(containerId, canvasId, items, labelFn, tickFn) {
+    const el = document.getElementById(containerId);
+    if (!items.length) {
+      el.innerHTML = `<div class="empty">対象期間に投稿はありませんでした。</div>`;
+      return;
+    }
+    const h = items.length * 44 + 40;
+    el.innerHTML = `<div class="chart-box-sm" style="height:${h}px"><canvas id="${canvasId}"></canvas></div>`;
+    const labels = items.map(labelFn);            // フル名称（ツールチップ表示用）
+    const shortLabels = items.map(tickFn || labelFn);  // 軸の目盛り表示用（短縮）
+    const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+    // 各バーの先端に値ラベルを描く（バー→値は先端、の慣例）
+    const valueLabelPlugin = {
+      id: canvasId + "-vals",
+      afterDatasetsDraw(c) {
+        const { ctx } = c;
+        ctx.save();
+        ctx.font = "600 11px system-ui, sans-serif";
+        ctx.fillStyle = cssVar("--text-primary");
+        ctx.textBaseline = "middle";
+        c.getDatasetMeta(0).data.forEach((bar, i) => {
+          ctx.fillText(fmt(c.data.datasets[0].data[i]), bar.x + 6, bar.y);
+        });
+        ctx.restore();
+      },
+    };
+    new Chart(document.getElementById(canvasId), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [{
+          data: items.map(i => i.count),
+          backgroundColor: cssVar("--series-1"),
+          maxBarThickness: 22,
+          borderRadius: 4,
+          borderSkipped: "start",  // データ側の端だけ丸め、ベースラインは直角
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 44 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { titleColor: cssVar("--text-primary"), bodyColor: cssVar("--text-primary"), backgroundColor: cssVar("--surface-1"), borderColor: cssVar("--border"), borderWidth: 1 },
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: cssVar("--grid") }, ticks: { color: cssVar("--muted"), precision: 0 }, border: { color: cssVar("--baseline") } },
+          y: {
+            grid: { display: false }, border: { color: cssVar("--baseline") },
+            ticks: {
+              color: cssVar("--text-secondary"), autoSkip: false,
+              callback: (v, i) => cut(shortLabels[i], 15),
+            },
+          },
+        },
+      },
+      plugins: [valueLabelPlugin],
+    });
+  }
+
+  // スレッドは目盛りにスレッド名のみ表示し、親チャンネルはツールチップ（フル名称）で確認
+  rankBarChart("channels", "chChart", data.channels_top || [], c => "#" + c.name);
+  rankBarChart("threads", "thChart", data.threads_top || [], t => `${t.channel} › ${t.name}`, t => t.name);
+
+  // 盛り上がりの推移（チャンネル・スレッド別、プルダウンで複数選択）
+  (function () {
+    const MAX_SELECT = 8;
+    const act = data.activity || { dates: [], series: [] };
+    const box = document.getElementById("actBox");
+    const emptyEl = document.getElementById("actEmpty");
+    const btn = document.getElementById("actBtn");
+    const menu = document.getElementById("actMenu");
+
+    if (!act.series.length) {
+      box.classList.add("hidden");
+      btn.classList.add("hidden");
+      emptyEl.classList.remove("hidden");
+      emptyEl.textContent = "推移データはまだありません。次回の週報実行から蓄積されます（--since 指定のバックフィルで過去分も作成できます）。";
+      return;
+    }
+
+    const palette = ["--series-1","--series-2","--series-3","--series-4","--series-5","--series-6","--series-7","--series-8"].map(cssVar);
+    const keyOf = s => s.kind + "|" + s.name;
+    const byKey = {};
+    act.series.forEach(s => { byKey[keyOf(s)] = s; });
+    // 凡例・メニューの表記: チャンネルは #名前、スレッドは「親 › スレッド名（スレッド）」
+    const labelOf = s => s.kind === "channel" ? "#" + s.name : s.name + "（スレッド）";
+
+    // デフォルト表示 = 週報で言及される上位チャンネル（activity_defaults）
+    const defaults = (data.activity_defaults || []).map(d => d.kind + "|" + d.name).filter(k => byKey[k]);
+    let selected = defaults.slice(0, MAX_SELECT);
+    if (!selected.length) selected = act.series.slice(0, 5).map(keyOf);
+
+    // 色は「選択された順」にスロットを割り当て、選択解除しても他の系列の色は変えない
+    const slotOwners = new Array(palette.length).fill(null);
+    function colorFor(key) {
+      let i = slotOwners.indexOf(key);
+      if (i === -1) { i = slotOwners.indexOf(null); slotOwners[i] = key; }
+      return palette[i];
+    }
+    function freeSlot(key) {
+      const i = slotOwners.indexOf(key);
+      if (i !== -1) slotOwners[i] = null;
+    }
+
+    function makeDatasets() {
+      return selected.map(key => {
+        const s = byKey[key];
+        const color = colorFor(key);
+        return {
+          label: labelOf(s),
+          data: s.counts,
+          borderColor: color,
+          backgroundColor: color,
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          tension: 0.25,
+          borderDash: s.kind === "thread" ? [6, 4] : [],  // スレッドは破線で区別
+        };
+      });
+    }
+
+    const actChart = new Chart(document.getElementById("actChart"), {
+      type: "line",
+      data: { labels: act.dates, datasets: makeDatasets() },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 44 } },
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { position: "top", labels: { color: cssVar("--text-secondary"), usePointStyle: true, pointStyle: "line" } },
+          tooltip: { titleColor: cssVar("--text-primary"), bodyColor: cssVar("--text-primary"), backgroundColor: cssVar("--surface-1"), borderColor: cssVar("--border"), borderWidth: 1 },
+        },
+        scales: {
+          x: { grid: { color: cssVar("--grid") }, ticks: { color: cssVar("--muted"), maxRotation: 0, autoSkipPadding: 16 }, border: { color: cssVar("--baseline") } },
+          y: { beginAtZero: true, grid: { color: cssVar("--grid") }, ticks: { color: cssVar("--muted"), precision: 0 }, border: { color: cssVar("--baseline") } },
+        },
+      },
+      plugins: [endLabelPlugin],
+    });
+
+    function updateBtn() {
+      btn.textContent = `表示する項目（${selected.length}/${MAX_SELECT}）▾`;
+    }
+
+    function renderMenu() {
+      const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+      const full = selected.length >= MAX_SELECT;
+      const item = (s) => {
+        const key = keyOf(s);
+        const on = selected.includes(key);
+        const disabled = !on && full;
+        const swStyle = on ? `background:${colorFor(key)}` : "";
+        return `<label class="dd-item${disabled ? " disabled" : ""}">
+          <input type="checkbox" data-key="${key.replace(/"/g, "&quot;")}" ${on ? "checked" : ""} ${disabled ? "disabled" : ""}>
+          <span class="sw${on ? " on" : ""}" style="${swStyle}"></span>
+          <span class="nm" title="${labelOf(s).replace(/"/g, "&quot;")}">${cut(labelOf(s), 26)}</span>
+        </label>`;
+      };
+      const channels = act.series.filter(s => s.kind === "channel");
+      const threads = act.series.filter(s => s.kind === "thread");
+      menu.innerHTML =
+        (channels.length ? `<div class="dd-group">チャンネル・掲示板</div>` + channels.map(item).join("") : "") +
+        (threads.length ? `<div class="dd-group">スレッド</div>` + threads.map(item).join("") : "") +
+        `<div class="dd-note">最大${MAX_SELECT}件まで表示できます（投稿数の多い順）</div>`;
+
+      menu.querySelectorAll("input[type=checkbox]").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const key = cb.dataset.key;
+          if (cb.checked) {
+            if (selected.length < MAX_SELECT) selected.push(key);
+          } else {
+            selected = selected.filter(k => k !== key);
+            freeSlot(key);
+          }
+          actChart.data.datasets = makeDatasets();
+          actChart.update();
+          updateBtn();
+          renderMenu();
+        });
+      });
+    }
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menu.classList.toggle("hidden");
+    });
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target) && e.target !== btn) menu.classList.add("hidden");
+    });
+
+    updateBtn();
+    renderMenu();
+  })();
+
+  // イベント
+  const evEl = document.getElementById("events");
+  if (!data.events.length) {
+    evEl.innerHTML = `<li class="empty">登録されているイベントはありません。</li>`;
+  } else {
+    evEl.innerHTML = data.events.map(ev => {
+      const meta = [];
+      if (ev.scheduled_start) meta.push("開催予定 " + ev.scheduled_start.replace("T", " ").slice(0, 16));
+      if (ev.user_count != null) meta.push("興味あり " + fmt(ev.user_count) + "人");
+      return `<li>
+        <div class="ev-top">
+          <span class="ev-name">${ev.name}</span>
+          <span class="badge ${statusClass(ev.status)}">${ev.status}</span>
+          ${ev.created_in_period ? `<span class="new-chip">今週立ち上げ</span>` : ""}
+        </div>
+        ${meta.length ? `<div class="ev-meta">${meta.join(" ・ ")}</div>` : ""}
+      </li>`;
+    }).join("");
+  }
+
+  const gen = new Date(data.generated_at);
+  document.getElementById("footer").textContent =
+    `最終更新: ${gen.toLocaleString("ja-JP")} ・ データ: ${data.repo}`;
+}
+main().catch(e => { document.getElementById("period").textContent = "データの読み込みに失敗しました: " + e; });
+</script>
+</body>
+</html>

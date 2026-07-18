@@ -26,6 +26,18 @@ class DailyMetric:
 
 
 @dataclass
+class MemberStats:
+    """メンバー別ダッシュボード用の個人別集計（直近N日）。"""
+
+    name: str
+    chars: int = 0  # 発言文字数
+    posts: int = 0  # 投稿数
+    mentions_out: int = 0  # 本人が他ユーザーへ付けたメンション数
+    mentions_in: int = 0  # 他ユーザーから受けたメンション数（被メンション）
+    event_interest: int = 0  # 「興味あり」を付けたイベント数（現存イベントのみ）
+
+
+@dataclass
 class EventRecord:
     name: str
     status: str  # 開催予定 / 開催中 / 終了 / 中止 など（日本語）
@@ -62,6 +74,9 @@ class CollectedData:
     total_member_count: int = 0
     admin_role_count: int = 0
     view_role_member_count: int = 0  # 「閲覧権限」ロール保持者数（＝DHUmember）
+    # メンバー別集計（Bot除く在籍メンバー全員。活動ゼロでも行を持つ）
+    member_stats: dict[int, MemberStats] = field(default_factory=dict)
+    member_window_start: datetime | None = None
 
 
 def _day_key(dt: datetime, tz) -> str:
@@ -96,7 +111,11 @@ def _event_status_ja(status) -> str:
 
 
 async def collect(
-    config: Config, since: datetime, until: datetime, analysis_since: datetime | None = None
+    config: Config,
+    since: datetime,
+    until: datetime,
+    analysis_since: datetime | None = None,
+    member_since: datetime | None = None,
 ) -> CollectedData:
     intents = discord.Intents.none()
     intents.guilds = True
@@ -116,7 +135,9 @@ async def collect(
     async def on_ready():
         nonlocal result, error
         try:
-            result = await _collect_with_client(client, config, since, until, analysis_since or since)
+            result = await _collect_with_client(
+                client, config, since, until, analysis_since or since, member_since or since
+            )
         except BaseException as exc:  # noqa: BLE001
             error = exc
         finally:
@@ -130,7 +151,12 @@ async def collect(
 
 
 async def _collect_with_client(
-    client: discord.Client, config: Config, since: datetime, until: datetime, analysis_since: datetime
+    client: discord.Client,
+    config: Config,
+    since: datetime,
+    until: datetime,
+    analysis_since: datetime,
+    member_since: datetime,
 ) -> CollectedData:
     guild = client.get_guild(config.guild_id)
     if guild is None:
@@ -138,6 +164,9 @@ async def _collect_with_client(
 
     tz = config.timezone
     data = CollectedData(period_start=since, period_end=until, analysis_start=analysis_since)
+    data.member_window_start = member_since
+    # メッセージ履歴の取得起点。メンバー別集計の窓が日別指標の窓より長い場合はそちらに合わせる
+    fetch_since = min(since, member_since)
 
     # 新規参加者数（日別）＋ 現在のスナップショット（総数・Administrator・閲覧権限）
     # 注: 新規参加者は現在サーバーに在籍しているメンバーの joined_at を用いるため、
@@ -152,6 +181,9 @@ async def _collect_with_client(
             data.view_role_member_count += 1
         if member.joined_at and since <= member.joined_at <= until:
             new_members_by_day[_day_key(member.joined_at, tz)] += 1
+        # メンバー別ダッシュボード: Botを除く在籍メンバー全員を（活動ゼロでも）載せる
+        if not member.bot:
+            data.member_stats[member.id] = MemberStats(name=member.display_name)
 
     # 「閲覧権限」ロール付与数（監査ログ・日別のユニークユーザー）＝DHUmember数
     # 自己紹介の投稿を起点に「閲覧権限」ロールが自動付与される運用のため、
@@ -201,6 +233,18 @@ async def _collect_with_client(
         akey = (kind, name, _day_key(message.created_at, tz))
         data.activity_daily_counts[akey] = data.activity_daily_counts.get(akey, 0) + 1
 
+    def _add_member_stats(message) -> None:
+        # メンバー別集計（直近N日）。退出済みメンバーの発言は載せない（在籍者のみ）。
+        stats = data.member_stats.get(message.author.id)
+        if stats is not None:
+            stats.chars += len(message.content or "")
+            stats.posts += 1
+            stats.mentions_out += len(message.raw_mentions)
+        for user_id in set(message.raw_mentions):
+            target = data.member_stats.get(user_id)
+            if target is not None:
+                target.mentions_in += 1
+
     async def _count_threads_for_ranking(parent, name_key: str, include_archived: bool) -> None:
         threads = list(getattr(parent, "threads", []))
         if include_archived:
@@ -211,8 +255,12 @@ async def _collect_with_client(
                 pass
         for th in threads:
             try:
-                async for m in th.history(limit=None, after=since, before=until, oldest_first=True):
+                async for m in th.history(limit=None, after=fetch_since, before=until, oldest_first=True):
                     if m.author.bot:
+                        continue
+                    if m.created_at >= member_since:
+                        _add_member_stats(m)
+                    if m.created_at < since:
                         continue
                     _add_activity("thread", f"{name_key} › {th.name}", m)
                     if m.created_at >= analysis_since:
@@ -228,8 +276,12 @@ async def _collect_with_client(
         if not channel.permissions_for(me).read_message_history:
             continue
         ranking = _is_ranking_target(channel)
-        async for message in channel.history(limit=None, after=since, before=until, oldest_first=True):
+        async for message in channel.history(limit=None, after=fetch_since, before=until, oldest_first=True):
             if message.author.bot:
+                continue
+            if message.created_at >= member_since:
+                _add_member_stats(message)
+            if message.created_at < since:
                 continue
             day = _day_key(message.created_at, tz)
             # アクティブユーザー数は日別・全期間で集計
@@ -270,18 +322,32 @@ async def _collect_with_client(
 
     # イベント（スケジュールイベント）: 現在の予定/開催中を取得し、
     # 監査ログから分析対象期間に立ち上がったものを補完する。
-    data.events = await _collect_events(guild, analysis_since, until)
+    data.events = await _collect_events(guild, analysis_since, until, data.member_stats)
 
     return data
 
 
-async def _collect_events(guild, analysis_since: datetime, until: datetime) -> list["EventRecord"]:
+async def _collect_events(
+    guild, analysis_since: datetime, until: datetime, member_stats: dict[int, "MemberStats"] | None = None
+) -> list["EventRecord"]:
     events_by_id: dict = {}
 
     try:
         scheduled = await guild.fetch_scheduled_events(with_counts=True)
     except Exception:  # noqa: BLE001
         scheduled = []
+
+    # メンバー別の「イベントへの興味」: 現存イベントに「興味あり」した数。
+    # 終了・削除済みイベントはAPIから消えるため遡れない（現在・未来のイベントのみ）。
+    if member_stats:
+        for ev in scheduled:
+            try:
+                async for user in ev.users():
+                    stats = member_stats.get(user.id)
+                    if stats is not None:
+                        stats.event_interest += 1
+            except (discord.Forbidden, discord.HTTPException):
+                continue
 
     for ev in scheduled:
         location = ev.channel.name if ev.channel else getattr(ev, "location", None)
@@ -327,6 +393,10 @@ async def _collect_events(guild, analysis_since: datetime, until: datetime) -> l
 
 
 def run_collect(
-    config: Config, since: datetime, until: datetime, analysis_since: datetime | None = None
+    config: Config,
+    since: datetime,
+    until: datetime,
+    analysis_since: datetime | None = None,
+    member_since: datetime | None = None,
 ) -> CollectedData:
-    return asyncio.run(collect(config, since, until, analysis_since))
+    return asyncio.run(collect(config, since, until, analysis_since, member_since))

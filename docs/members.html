@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHW メンバー別 活動ダッシュボード</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --bad: #c0322f;
+    --series-1: #2a78d6; /* blue */
+    --series-2: #1baf7a; /* aqua */
+    --series-3: #eda100; /* yellow */
+    --series-4: #008300; /* green */
+    --series-5: #4a3aa7; /* violet */
+    --series-6: #e34948; /* red */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --bad: #e66767;
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --series-3: #c98500;
+      --series-4: #008300;
+      --series-5: #9085e9;
+      --series-6: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin-bottom: 20px; }
+  header .titles { flex: 1 1 auto; min-width: 240px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: var(--text-secondary); font-size: 13px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; text-decoration: none;
+    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border);
+    color: var(--text-primary); background: var(--surface-1);
+  }
+  .btn.primary { background: var(--series-1); color: #fff; border-color: transparent; }
+  .btn:hover { filter: brightness(1.04); }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px; margin-bottom: 16px;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  h2 { font-size: 15px; margin: 0; }
+  .hint { font-size: 12px; color: var(--muted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 2px 0 12px; }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); cursor: default; user-select: none; }
+  .legend .item .sw { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  .legend .item .q { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 50%; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; }
+
+  #chartWrap { position: relative; }
+  #memberChart { display: block; width: 100%; cursor: crosshair; }
+
+  .tip { position: fixed; z-index: 50; max-width: 320px; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; font-size: 12px; line-height: 1.6; box-shadow: 0 6px 20px rgba(0,0,0,.18); pointer-events: none; }
+  .tip .tip-h { font-weight: 700; margin-bottom: 3px; font-size: 13px; }
+  .tip table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .tip td { padding: 1px 0; }
+  .tip td:first-child { padding-right: 12px; color: var(--text-secondary); }
+  .tip td:last-child { text-align: right; font-weight: 600; }
+  .tip .tsw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .notes { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.7; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  .lock {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--page);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lock-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px 30px; width: min(360px, 90vw);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .lock-card h2 { font-size: 17px; margin: 0; }
+  .lock-card p { margin: 0; font-size: 13px; color: var(--text-secondary); }
+  .lock-card input {
+    font: inherit; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--page); color: var(--text-primary);
+  }
+  .lock-card .btn { justify-content: center; cursor: pointer; border: 0; font: inherit; }
+  .lock-err { font-size: 12px; color: var(--bad); }
+
+  /* display:none は最後に置き、.lock 等の display 指定より優先させる（index.html と同じ順序） */
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="titles">
+      <h1>メンバー別 活動ダッシュボード</h1>
+      <div class="sub" id="period">読み込み中…</div>
+    </div>
+    <div class="actions">
+      <a class="btn" href="./index.html">← 総合ダッシュボード</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>参加者全員の活動状況（積層横棒）</h2>
+      <span class="hint">1行＝1メンバー。バーにマウスを載せると拡大表示され、ユーザー名と各指標の値が出ます。</span>
+    </div>
+    <div id="legend" class="legend"></div>
+    <div id="chartWrap"><canvas id="memberChart"></canvas></div>
+    <div id="chartEmpty" class="empty hidden">メンバー別の集計データはまだありません。次回の週報実行から反映されます。</div>
+    <div class="notes" id="notes"></div>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+<div id="tip" class="tip hidden" role="tooltip"></div>
+<div id="lock" class="lock hidden">
+  <form class="lock-card" id="lockForm">
+    <h2>🔒 DHW メンバー別ダッシュボード</h2>
+    <p>閲覧にはパスワードが必要です。</p>
+    <input type="password" id="lockPw" placeholder="パスワード" autocomplete="current-password" autofocus>
+    <button class="btn primary" type="submit">開く</button>
+    <div id="lockErr" class="lock-err hidden">パスワードが違います。</div>
+  </form>
+</div>
+
+<script>
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (n) => new Intl.NumberFormat("ja-JP").format(n);
+
+// 暗号化データ（data.enc）の復号: PBKDF2-SHA256 で鍵導出 → AES-256-GCM（index.html と共通）
+async function decryptPayload(enc, password) {
+  const b64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const baseKey = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64(enc.salt), iterations: enc.iter, hash: "SHA-256" },
+    baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(enc.iv) }, key, b64(enc.ct));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+async function loadData() {
+  const encRes = await fetch("./data.enc", { cache: "no-store" });
+  if (!encRes.ok) {
+    return fetch("./data.json", { cache: "no-store" }).then(r => r.json());
+  }
+  const enc = await encRes.json();
+
+  // index.html と同じキーで保存するため、同一タブ内はページをまたいで再入力不要
+  const saved = sessionStorage.getItem("dhw_dash_pw");
+  if (saved !== null) {
+    try { return await decryptPayload(enc, saved); }
+    catch (e) { sessionStorage.removeItem("dhw_dash_pw"); }
+  }
+
+  const lock = document.getElementById("lock");
+  lock.classList.remove("hidden");
+  document.getElementById("lockPw").focus();
+  return new Promise((resolve) => {
+    document.getElementById("lockForm").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const pw = document.getElementById("lockPw").value;
+      try {
+        const d = await decryptPayload(enc, pw);
+        sessionStorage.setItem("dhw_dash_pw", pw);
+        lock.classList.add("hidden");
+        resolve(d);
+      } catch (e) {
+        document.getElementById("lockErr").classList.remove("hidden");
+        document.getElementById("lockPw").select();
+      }
+    });
+  });
+}
+
+async function main() {
+  const data = await loadData();
+  const m = data.members;
+
+  if (!m || !m.rows || !m.rows.length) {
+    document.getElementById("period").textContent = "メンバー別データがありません";
+    document.getElementById("chartEmpty").classList.remove("hidden");
+    return;
+  }
+
+  document.getElementById("period").textContent =
+    `集計期間: ${m.window.start} 〜 ${m.window.end}（直近${m.window_days}日間・${m.rows.length}人）`;
+
+  const keys = m.metric_keys;
+  const labels = m.metric_labels;
+  const defs = m.metric_defs || {};
+  const palette = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6"].map(cssVar);
+  const colorOf = (k) => palette[keys.indexOf(k) % palette.length];
+  const vcAvailable = !!m.vc_available;
+
+  // 値の単位（ツールチップ表示用）
+  const unitOf = { chars: "字", posts: "件", mentions_out: "回", mentions_in: "回", vc_min: "分", event_interest: "件" };
+
+  // 正規化: 指標ごとに全メンバー中の最大値で 0〜1 に割る。
+  // バーの長さ＝正規化値の合計（＝どの指標も同じ重みの総合スコア）。
+  const maxOf = {};
+  keys.forEach(k => {
+    maxOf[k] = Math.max(0, ...m.rows.map(r => r[k] ?? 0));
+  });
+  const rows = m.rows.map(r => {
+    const fracs = keys.map(k => (maxOf[k] > 0 ? (r[k] ?? 0) / maxOf[k] : 0));
+    return { ...r, fracs, score: fracs.reduce((a, b) => a + b, 0) };
+  }).sort((a, b) => b.score - a.score || (a.name > b.name ? 1 : -1));
+
+  // 凡例（ホバーで定義を表示）
+  const legendEl = document.getElementById("legend");
+  legendEl.innerHTML = keys.map(k => {
+    const def = (defs[k] || "").replace(/"/g, "&quot;");
+    return `<span class="item" data-label="${labels[k]}" data-def="${def}" tabindex="0">
+      <span class="sw" style="background:${colorOf(k)}"></span>
+      <span class="name">${labels[k]}${k === "vc_min" && !vcAvailable ? "（記録なし）" : ""}</span>
+      <span class="q" aria-hidden="true">?</span>
+    </span>`;
+  }).join("");
+
+  const tip = document.getElementById("tip");
+  const placeTip = (x, y) => {
+    const w = tip.offsetWidth || 300, h = tip.offsetHeight || 120;
+    tip.style.left = Math.min(x + 14, window.innerWidth - w - 8) + "px";
+    tip.style.top = Math.min(y + 16, window.innerHeight - h - 8) + "px";
+  };
+  const hideTip = () => tip.classList.add("hidden");
+
+  legendEl.querySelectorAll(".item").forEach((el) => {
+    const show = (x, y) => {
+      if (!el.dataset.def) return;
+      tip.innerHTML = `<div class="tip-h">${el.dataset.label}</div>${el.dataset.def}`;
+      tip.classList.remove("hidden");
+      placeTip(x, y);
+    };
+    el.addEventListener("mouseenter", (e) => show(e.clientX, e.clientY));
+    el.addEventListener("mousemove", (e) => show(e.clientX, e.clientY));
+    el.addEventListener("mouseleave", hideTip);
+    el.addEventListener("focus", () => { const r = el.getBoundingClientRect(); show(r.left, r.bottom); });
+    el.addEventListener("blur", hideTip);
+  });
+
+  // ===== 積層横棒（カスタム描画） =====
+  // 全員分を数ピクセルの行で描き、ホバー行だけ拡大して名前を表示する。
+  const ROW_H = 5;        // 通常の行の高さ(px)
+  const ROW_GAP = 1;      // 行間(px)
+  const PITCH = ROW_H + ROW_GAP;
+  const HOVER_H = 24;     // ホバー時の拡大高さ(px)
+  const PAD_TOP = 4, PAD_BOTTOM = 4;
+
+  const canvas = document.getElementById("memberChart");
+  const ctx = canvas.getContext("2d");
+  let hoverIdx = -1;
+
+  function chartHeight() { return PAD_TOP + rows.length * PITCH - ROW_GAP + PAD_BOTTOM; }
+
+  function draw() {
+    const cssW = canvas.clientWidth || canvas.parentElement.clientWidth;
+    const cssH = chartHeight();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.height = cssH + "px";
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const plotW = cssW;
+    const segMaxW = plotW / keys.length;  // 各指標が取り得る最大幅（全指標同じ重み）
+
+    const drawRow = (r, y, h) => {
+      let x = 0;
+      r.fracs.forEach((f, i) => {
+        const w = f * segMaxW;
+        if (w <= 0) return;
+        ctx.fillStyle = palette[i % palette.length];
+        ctx.fillRect(x, y, w, h);
+        x += w;
+      });
+      return x;  // バーの右端
+    };
+
+    rows.forEach((r, i) => {
+      if (i === hoverIdx) return;  // ホバー行は最後に上書き描画
+      drawRow(r, PAD_TOP + i * PITCH, ROW_H);
+    });
+
+    if (hoverIdx >= 0) {
+      const r = rows[hoverIdx];
+      const cy = PAD_TOP + hoverIdx * PITCH + ROW_H / 2;
+      const y = Math.max(0, Math.min(cy - HOVER_H / 2, cssH - HOVER_H));
+      // 下地（周囲の行と区別する帯）
+      ctx.fillStyle = cssVar("--surface-1");
+      ctx.fillRect(0, y - 2, plotW, HOVER_H + 4);
+      const barEnd = drawRow(r, y, HOVER_H);
+      ctx.strokeStyle = cssVar("--text-primary");
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0.5, y + 0.5, Math.max(barEnd, 2) - 1, HOVER_H - 1);
+      // ユーザー名（バーの右か、収まらなければバー内右寄せ）
+      ctx.font = "700 12px system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      const nameW = ctx.measureText(r.name).width;
+      if (barEnd + 8 + nameW < plotW) {
+        ctx.fillStyle = cssVar("--text-primary");
+        ctx.fillText(r.name, barEnd + 8, y + HOVER_H / 2);
+      } else {
+        ctx.fillStyle = "#fff";
+        ctx.fillText(r.name, Math.max(4, barEnd - nameW - 6), y + HOVER_H / 2);
+      }
+    }
+  }
+
+  function rowTip(r, i, x, y) {
+    const lines = keys.map((k, j) => {
+      let v;
+      if (k === "vc_min" && !vcAvailable) v = "—（記録なし）";
+      else v = fmt(r[k] ?? 0) + (unitOf[k] || "");
+      return `<tr><td><span class="tsw" style="background:${palette[j % palette.length]}"></span>${labels[k]}</td><td>${v}</td></tr>`;
+    }).join("");
+    tip.innerHTML = `<div class="tip-h">${r.name}</div>
+      <div style="color:var(--muted); margin-bottom:4px;">活動スコア ${i + 1}位 / ${rows.length}人</div>
+      <table>${lines}</table>`;
+    tip.classList.remove("hidden");
+    placeTip(x, y);
+  }
+
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const i = Math.floor((y - PAD_TOP) / PITCH);
+    const idx = (i >= 0 && i < rows.length) ? i : -1;
+    if (idx !== hoverIdx) { hoverIdx = idx; draw(); }
+    if (idx >= 0) rowTip(rows[idx], idx, e.clientX, e.clientY);
+    else hideTip();
+  });
+  canvas.addEventListener("mouseleave", () => { hoverIdx = -1; hideTip(); draw(); });
+  window.addEventListener("resize", draw);
+  draw();
+
+  // 注記
+  const notes = [
+    "バーの長さは、各指標を全メンバー中の最大値で正規化（0〜1）して積み上げた総合スコアです（指標間の単位の違いを吸収するため）。",
+    "並び順は総合スコアの高い順です。",
+  ];
+  if (vcAvailable) {
+    notes.push(`VC参加時間は${m.vc_interval_min}分間隔の定期スナップショットからの概算です（短時間の参加は取りこぼすことがあり、記録開始以降のみ集計）。`);
+  } else {
+    notes.push("VC参加時間はまだ記録がありません。VCスナップショットのワークフローが動き始めると集計されます。");
+  }
+  notes.push("「イベントへの興味」は現在登録されているイベントが対象です（終了・削除済みイベントはDiscord APIから取得できません）。");
+  document.getElementById("notes").innerHTML = notes.map(n => "※ " + n).join("<br>");
+
+  const gen = new Date(data.generated_at);
+  document.getElementById("footer").textContent =
+    `最終更新: ${gen.toLocaleString("ja-JP")} ・ データ: ${data.repo}`;
+}
+main().catch(e => { document.getElementById("period").textContent = "データの読み込みに失敗しました: " + e; });
+</script>
+</body>
+</html>

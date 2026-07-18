@@ -1,0 +1,63 @@
+name: VC snapshot
+
+# ボイスチャンネル在室者の定期スナップショット。
+# DiscordのAPIには過去のVC履歴が無いため、定期的に「その瞬間の在室者」を記録して
+# vc_history.csv に蓄積し、メンバー別ダッシュボードで概算参加時間として集計する。
+#
+# 実行間隔（cron）を変えたら、週報側の VC_SNAPSHOT_INTERVAL_MIN も同じ分数に合わせること
+# （概算参加時間 = 在室スナップショット数 × この間隔）。
+# 注意: Private リポジトリでは Actions の無料枠（分数）を消費する。15分毎は最大 ~96回/日。
+# 枠が気になる場合は cron を "*/30 * * * *" などに間引く。
+#
+# 必要な設定: Secrets に DISCORD_TOKEN / GUILD_ID（週報と共通）
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vc-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install "discord.py>=2.4.0" "python-dotenv>=1.0.1"
+
+      - name: Take VC snapshot
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
+        run: python vc_snapshot.py
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vc_history.csv
+          if git diff --cached --quiet; then
+            echo "在室者がいないためコミットをスキップします。"
+            exit 0
+          fi
+          git commit -m "Record VC snapshot"
+          # 週報ワークフロー等のコミットと競合したら rebase して再試行する
+          for i in 1 2 3; do
+            if git push origin "HEAD:${{ github.ref_name }}"; then
+              exit 0
+            fi
+            git pull --rebase origin "${{ github.ref_name }}"
+          done
+          git push origin "HEAD:${{ github.ref_name }}"

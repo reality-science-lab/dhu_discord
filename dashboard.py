@@ -1,8 +1,9 @@
 """ダッシュボード用のデータを書き出す。
 
-個人情報は出さない: メンバー名・発言本文は含めず、集計値（指標の推移、
-チャンネル別の件数、イベントの状態）のみをエクスポートする。週報本文を
-含める場合は、必ずパスワードで暗号化した ``docs/data.enc`` にのみ格納する。
+発言本文は含めない。メンバー名を含むメンバー別集計と週報本文は、
+パスワードで暗号化した ``docs/data.enc`` にのみ格納する（CI では
+DASHBOARD_PASSWORD が必須のため平文で公開されることはない。パスワード
+未設定の平文 ``data.json`` はローカル開発専用で、コミットしない）。
 """
 
 import base64
@@ -64,6 +65,91 @@ def _kpis(history: pd.DataFrame, last_day) -> list[dict]:
             }
         )
     return kpis
+
+
+MEMBER_METRIC_KEYS = ["chars", "posts", "mentions_out", "mentions_in", "vc_min", "event_interest"]
+
+MEMBER_METRIC_LABELS_JA = {
+    "chars": "発言文字数",
+    "posts": "投稿数",
+    "mentions_out": "メンション数",
+    "mentions_in": "被メンション数",
+    "vc_min": "VC参加時間（分・概算）",
+    "event_interest": "イベントへの興味",
+}
+
+MEMBER_METRIC_DEFS_JA = {
+    "chars": "集計期間中に対象テキストチャンネル・スレッドへ投稿したメッセージの合計文字数。",
+    "posts": "集計期間中の投稿メッセージ数。",
+    "mentions_out": "本人の投稿に含まれる他ユーザーへの@メンションの合計数。",
+    "mentions_in": "他のメンバーの投稿で@メンションされた回数。",
+    "vc_min": (
+        "ボイスチャンネルへの概算参加時間。定期スナップショット（既定15分間隔）で在室が確認された"
+        "回数×間隔で概算するため、短時間の参加は取りこぼすことがある。記録開始以降のみ。"
+    ),
+    "event_interest": (
+        "サーバーのスケジュールイベントに「興味あり」を付けた数。終了・削除済みイベントは"
+        "Discord APIから消えるため、現在登録されているイベントのみが対象。"
+    ),
+}
+
+
+def _vc_minutes_by_user(config: Config, window_start, window_end) -> dict[int, int] | None:
+    """vc_history.csv から集計窓内の概算VC参加分数をユーザーID別に返す。
+
+    概算 = 在室が記録されたスナップショット時刻数 × スナップショット間隔（分）。
+    CSVが無い（スナップショット運用を始めていない）場合は None。
+    """
+    path = config.vc_csv_path
+    if not os.path.exists(path):
+        return None
+    try:
+        df = pd.read_csv(path)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError):
+        return {}
+    if df.empty or not {"ts_utc", "user_id"}.issubset(df.columns):
+        return {}
+    ts = pd.to_datetime(df["ts_utc"], utc=True, errors="coerce")
+    df = df[(ts >= pd.Timestamp(window_start)) & (ts < pd.Timestamp(window_end))]
+    if df.empty:
+        return {}
+    per_user = df.groupby("user_id")["ts_utc"].nunique() * config.vc_snapshot_interval_min
+    return {int(uid): int(minutes) for uid, minutes in per_user.items()}
+
+
+def _members_payload(config: Config, data: CollectedData) -> dict:
+    """メンバー別ダッシュボード用データ。名前を含むため暗号化データにのみ入れる前提。"""
+    tz = config.timezone
+    window_start = data.member_window_start or data.period_start
+    window_end = data.period_end
+    vc = _vc_minutes_by_user(config, window_start, window_end)
+
+    rows = [
+        {
+            "name": st.name,
+            "chars": st.chars,
+            "posts": st.posts,
+            "mentions_out": st.mentions_out,
+            "mentions_in": st.mentions_in,
+            "vc_min": (vc.get(uid, 0) if vc is not None else None),
+            "event_interest": st.event_interest,
+        }
+        for uid, st in data.member_stats.items()
+    ]
+
+    return {
+        "window_days": config.member_activity_days,
+        "window": {
+            "start": window_start.astimezone(tz).date().isoformat(),
+            "end": (window_end - timedelta(microseconds=1)).astimezone(tz).date().isoformat(),
+        },
+        "vc_available": vc is not None,
+        "vc_interval_min": config.vc_snapshot_interval_min,
+        "metric_keys": MEMBER_METRIC_KEYS,
+        "metric_labels": MEMBER_METRIC_LABELS_JA,
+        "metric_defs": MEMBER_METRIC_DEFS_JA,
+        "rows": rows,
+    }
 
 
 def _activity_payload(activity: pd.DataFrame | None) -> dict:
@@ -211,6 +297,8 @@ def write_dashboard_data(
         "activity": _activity_payload(activity),
         "activity_defaults": [{"kind": "channel", "name": c["name"]} for c in channels_top],
         "events": events,
+        # メンバー別ダッシュボード（docs/members.html）。名前を含むため暗号化前提。
+        "members": _members_payload(config, data),
         # 現在時点のスナップショット（総数）。「閲覧権限」ロールは DHUmember として表記する。
         "totals": {
             "member_count": data.total_member_count,

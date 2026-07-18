@@ -121,11 +121,13 @@
   @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
 
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .seg button {
+  .seg button, .seg a {
     font: inherit; font-size: 12px; padding: 5px 12px; border: 0; cursor: pointer;
     background: var(--surface-1); color: var(--text-secondary);
+    text-decoration: none; display: inline-block;
   }
-  .seg button.on { background: var(--series-1); color: #fff; }
+  .seg button.on, .seg a.on { background: var(--series-1); color: #fff; cursor: default; }
+  .dash-tabs a { font-size: 13px; font-weight: 600; padding: 8px 16px; }
 
   .chart-box { position: relative; height: 340px; }
 
@@ -208,7 +210,10 @@
       <div class="sub" id="period">読み込み中…</div>
     </div>
     <div class="actions">
-      <a class="btn" href="./members.html">メンバー別ダッシュボード</a>
+      <nav class="seg dash-tabs" aria-label="ダッシュボード切替">
+        <a href="./index.html" class="on" aria-current="page">総合ダッシュボード</a>
+        <a href="./members.html">メンバー別ダッシュボード</a>
+      </nav>
       <a class="btn" id="runsBtn" href="#" target="_blank" rel="noopener">実行結果を見る</a>
     </div>
   </header>

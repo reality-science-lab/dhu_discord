@@ -64,6 +64,14 @@
   .btn.primary { background: var(--series-1); color: #fff; border-color: transparent; }
   .btn:hover { filter: brightness(1.04); }
 
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg a {
+    font: inherit; font-size: 13px; font-weight: 600; padding: 8px 16px; border: 0; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary);
+    text-decoration: none; display: inline-block;
+  }
+  .seg a.on { background: var(--series-1); color: #fff; cursor: default; }
+
   .card {
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px 18px; margin-bottom: 16px;
@@ -123,7 +131,10 @@
       <div class="sub" id="period">読み込み中…</div>
     </div>
     <div class="actions">
-      <a class="btn" href="./index.html">← 総合ダッシュボード</a>
+      <nav class="seg dash-tabs" aria-label="ダッシュボード切替">
+        <a href="./index.html">総合ダッシュボード</a>
+        <a href="./members.html" class="on" aria-current="page">メンバー別ダッシュボード</a>
+      </nav>
     </div>
   </header>
 

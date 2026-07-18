@@ -114,7 +114,7 @@ python main.py --since 2026-06-04 --until 2026-07-02 --skip-report
 
 1. リポジトリの **Settings → Pages**
 2. **Source** = 「Deploy from a branch」
-3. **Branch** = `claude/beautiful-darwin-crqcwi`、フォルダ = **`/docs`** を選んで **Save**
+3. **Branch** = `main`、フォルダ = **`/docs`** を選んで **Save**
 4. 数分後、`https://<オーナー>.github.io/<リポジトリ>/` で公開されます
 
 > GitHub Pages サイトは原則インターネット公開です（この構成は集計値のみ公開）。

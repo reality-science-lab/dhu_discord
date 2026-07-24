@@ -359,14 +359,17 @@ async def _collect_events(
 
     for ev in scheduled:
         location = ev.channel.name if ev.channel else getattr(ev, "location", None)
+        # discord.py 2.7 では ScheduledEvent.created_at が提供されない。
+        # 取得できるバージョンだけ作成日時／期間判定に使い、無い場合でも週報生成は継続する。
+        created_at = getattr(ev, "created_at", None)
         events_by_id[ev.id] = EventRecord(
             name=ev.name,
             status=_event_status_ja(ev.status),
             scheduled_start=ev.start_time,
-            created_at=ev.created_at,
+            created_at=created_at,
             user_count=ev.user_count,
             location=location,
-            created_in_period=(ev.created_at is not None and analysis_since <= ev.created_at <= until),
+            created_in_period=(created_at is not None and analysis_since <= created_at <= until),
         )
 
     # 監査ログ（保持期間内）から、期間中に作成されたイベントを補完

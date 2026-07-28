@@ -4,17 +4,22 @@ name: VC snapshot
 # DiscordのAPIには過去のVC履歴が無いため、20分毎に「その瞬間の在室者」を記録して
 # 蓄積し、週報・メンバー別ダッシュボードで概算滞在時間として集計する。
 #
-# 記録先は main ではなく専用のデータブランチ（vc-log）。72コミット/日 になるため、
-# main のコミット履歴・PR差分を汚さないように分けている。ブランチが無ければ初回実行時に
-# 空の orphan ブランチとして作られる。
+# 【重要】20分間隔は cron ではなく "1回のジョブの中" で作る。
+#   GitHub の schedule は短間隔（*/20 など）だと高負荷時にまるごと落とされ、
+#   実際に "*/20 * * * *" では3時間以上1度も発火しなかった。そこで cron は
+#   1時間に1回だけにし、そのジョブの中で 20分おきに複数回スナップショットを取る。
+#   これで「cronが72回/日ちゃんと発火すること」への依存が 24回/日 に下がり、
+#   1回発火すればその1時間ぶんの取りこぼしが無くなる。
+#   毎時7分という半端な時刻にしているのも、混雑する毎時0分を避けるため。
 #
-# 実行間隔を変えるときは、下の cron と週報側の VC_SNAPSHOT_INTERVAL_MIN
-# （Variables、既定20）を必ず揃えること。概算滞在時間 = 在室スナップショット数 × 間隔。
+# 記録先は main ではなく専用のデータブランチ（vc-log）。main のコミット履歴・PR差分を
+# 汚さないように分けている。ブランチが無ければ初回実行時に空の orphan ブランチとして作られる。
 #
-# 注意:
-#  - Public リポジトリのため Actions の実行時間は無料枠を消費しない。
-#  - GitHub の schedule は高負荷時に遅延・スキップされることがあり、20分間隔は保証されない。
-#    欠測した回のぶんは概算滞在時間が少なめに出る。
+# 実行間隔を変えるときは、Variables の VC_SNAPSHOT_INTERVAL_MIN（既定20）を変えること。
+# ジョブ内の待ち時間と週報側の概算計算の両方がこの値を見る。
+# 概算滞在時間 = 在室が観測された時間帯（間隔ぶんのバケット）の数 × 間隔。
+#
+# 注意: Public リポジトリのため Actions の実行時間は無料枠を消費しない。
 #
 # 必要な設定: Secrets に DISCORD_TOKEN / GUILD_ID / VC_HASH_SECRET
 #   VC_HASH_SECRET は在室者IDを仮名化するHMACの鍵。週報ワークフローにも同じ値が必要。
@@ -22,8 +27,14 @@ name: VC snapshot
 
 on:
   schedule:
-    - cron: "*/20 * * * *"
+    # 毎時7分（混雑する毎時0分を避ける）。20分間隔はジョブ内のループで作る。
+    - cron: "7 * * * *"
   workflow_dispatch:
+    inputs:
+      snapshots:
+        description: "1回の実行で取るスナップショット数（省略時は3＝20分×3で1時間ぶん）"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -38,6 +49,8 @@ env:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
+    # 次の毎時実行が来る前に必ず終わらせる（詰まったジョブが後続を待たせないように）
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +60,15 @@ jobs:
 
       - name: Install dependencies
         run: pip install "discord.py>=2.4.0" "python-dotenv>=1.0.1"
+
+      - name: Check VC hash secret
+        env:
+          VC_HASH_SECRET: ${{ secrets.VC_HASH_SECRET }}
+        run: |
+          if [ -z "$VC_HASH_SECRET" ]; then
+            echo "::error::Secrets に VC_HASH_SECRET が未設定です。公開ブランチに生のユーザーIDを残さないため、在室者IDは秘密鍵付きハッシュで仮名化して記録します。Settings → Secrets and variables → Actions で登録してください（週報ワークフローにも同じ値が必要です）。"
+            exit 1
+          fi
 
       - name: Prepare VC log branch
         run: |
@@ -63,33 +85,38 @@ jobs:
             git -C vc-log switch --orphan "$VC_LOG_BRANCH"
           fi
 
-      - name: Take VC snapshot
+      - name: Take VC snapshots
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           GUILD_ID: ${{ secrets.GUILD_ID }}
           VC_HASH_SECRET: ${{ secrets.VC_HASH_SECRET }}
           VC_CSV_PATH: vc-log/vc_history.csv
-        run: python vc_snapshot.py
-
-      - name: Commit snapshot
-        working-directory: vc-log
+          SNAPSHOTS: ${{ inputs.snapshots || '3' }}
+          INTERVAL_MIN: ${{ vars.VC_SNAPSHOT_INTERVAL_MIN || '20' }}
         run: |
-          set -euo pipefail
-          if [ ! -f vc_history.csv ]; then
-            echo "在室者がいないため（履歴ファイルが未作成）コミットをスキップします。"
-            exit 0
-          fi
-          git add vc_history.csv
-          if git diff --cached --quiet; then
-            echo "在室者がいないためコミットをスキップします。"
-            exit 0
-          fi
-          git commit -m "Record VC snapshot"
-          # 手動実行と定期実行が重なった場合に備えて rebase して再試行する
-          for _ in 1 2 3; do
-            if git push origin "$VC_LOG_BRANCH"; then
-              exit 0
+          # 途中の1回が失敗しても残りの見回りは続ける（-e は付けない）
+          set -uo pipefail
+          for i in $(seq 1 "$SNAPSHOTS"); do
+            echo "::group::スナップショット $i/$SNAPSHOTS"
+            if python vc_snapshot.py; then
+              (
+                cd vc-log
+                git add vc_history.csv 2>/dev/null || true
+                if git diff --cached --quiet; then
+                  echo "在室者がいないためコミットをスキップします。"
+                else
+                  git commit -q -m "Record VC snapshot"
+                  for _ in 1 2 3; do
+                    git push -q origin "$VC_LOG_BRANCH" && break
+                    git pull --rebase -q origin "$VC_LOG_BRANCH" || true
+                  done
+                fi
+              )
+            else
+              echo "::warning::スナップショット $i/$SNAPSHOTS に失敗しました。次の回に続行します。"
             fi
-            git pull --rebase origin "$VC_LOG_BRANCH"
+            echo "::endgroup::"
+            if [ "$i" -lt "$SNAPSHOTS" ]; then
+              sleep $(( INTERVAL_MIN * 60 ))
+            fi
           done
-          git push origin "$VC_LOG_BRANCH"

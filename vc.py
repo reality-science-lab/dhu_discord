@@ -2,7 +2,9 @@
 
 DiscordのAPIには過去のVCセッションを返す機能が無いため、``vc_snapshot.py`` を
 定期実行（既定20分毎）して「その瞬間VCにいる人」を記録し、
-**在室スナップショット数 × 実行間隔** で滞在時間を概算する。
+**在室が観測された時間帯の数 × 実行間隔** で滞在時間を概算する。
+時刻は間隔ぶんのバケットに丸めてから数えるので、実行が重なって同じ時間帯の
+スナップショットが2回記録されても時間は二重計上されない。
 
 ログは公開リポジトリのデータ用ブランチに置くため、CSVにはユーザーIDそのもの
 ではなく ``VC_HASH_SECRET`` を鍵とした HMAC-SHA256 の仮名だけを記録する。
@@ -14,7 +16,7 @@ import csv
 import hashlib
 import hmac
 import os
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -36,6 +38,16 @@ class VcChannelStat:
     minutes: int  # 延べ滞在時間（人×分の概算）
     unique_users: int  # 期間中に一度でも在室したユニーク人数
     snapshots: int  # 在室者が観測されたスナップショット回数
+
+
+def _bucket(ts: datetime, interval_min: int) -> int:
+    """時刻を interval_min 分のバケットに丸める。
+
+    滞在時間は「行数×間隔」ではなく「在室が観測されたバケット数×間隔」で数える。
+    こうすると、cronの遅延で実行が重なったり手動実行が定期実行と同時刻になったりして
+    同じ時間帯のスナップショットが2回記録されても、時間が二重計上されない。
+    """
+    return int(ts.timestamp()) // 60 // interval_min
 
 
 def pseudonym(secret: str, user_id: int) -> str:
@@ -111,41 +123,43 @@ def attach_vc_stats(config: "Config", data: "CollectedData") -> None:
     analysis_start = data.analysis_start or data.period_start
     until = data.period_end
 
-    member_counts: Counter[int] = Counter()
-    # チャンネルID -> 観測行。改名に備えて最新の名前を表示に使う。
-    channel_rows: dict[str, list[tuple[datetime, int]]] = defaultdict(list)
+    # メンバー -> 在室が観測された時間帯（バケット）の集合
+    member_buckets: dict[int, set[int]] = defaultdict(set)
+    # チャンネルID -> (メンバー, バケット) の集合。改名に備えて最新の名前を表示に使う。
+    channel_slots: dict[str, set[tuple[int, int]]] = defaultdict(set)
     channel_names: dict[str, tuple[datetime, str]] = {}
 
     for ts, user_hash, channel_id, channel_name in rows:
         member_id = by_hash.get(user_hash)
         if member_id is None:
             continue
+        bucket = _bucket(ts, interval)
         if member_start <= ts < until:
-            member_counts[member_id] += 1
+            member_buckets[member_id].add(bucket)
         if analysis_start <= ts < until:
-            channel_rows[channel_id].append((ts, member_id))
+            channel_slots[channel_id].add((member_id, bucket))
             latest = channel_names.get(channel_id)
             if channel_name and (latest is None or ts >= latest[0]):
                 channel_names[channel_id] = (ts, channel_name)
 
-    for member_id, count in member_counts.items():
-        data.member_stats[member_id].vc_minutes = count * interval
+    for member_id, buckets in member_buckets.items():
+        data.member_stats[member_id].vc_minutes = len(buckets) * interval
 
     channels = [
         VcChannelStat(
             name=channel_names.get(channel_id, (until, channel_id))[1],
-            minutes=len(entries) * interval,
-            unique_users=len({member_id for _, member_id in entries}),
-            snapshots=len({ts for ts, _ in entries}),
+            minutes=len(slots) * interval,
+            unique_users=len({member_id for member_id, _ in slots}),
+            snapshots=len({bucket for _, bucket in slots}),
         )
-        for channel_id, entries in channel_rows.items()
+        for channel_id, slots in channel_slots.items()
     ]
     channels.sort(key=lambda c: (-c.minutes, c.name))
     data.vc_channels = channels
 
     data.vc_total_minutes = sum(c.minutes for c in channels)
     data.vc_unique_users = len(
-        {member_id for entries in channel_rows.values() for _, member_id in entries}
+        {member_id for slots in channel_slots.values() for member_id, _ in slots}
     )
     # 対象期間にスナップショットが1件も無い（＝収集がまだ始まっていない）判定に使う
     data.vc_first_seen = min((ts for ts, *_ in rows), default=None)

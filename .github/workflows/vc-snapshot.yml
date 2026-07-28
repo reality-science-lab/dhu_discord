@@ -4,20 +4,36 @@ name: VC snapshot
 # DiscordのAPIには過去のVC履歴が無いため、20分毎に「その瞬間の在室者」を記録して
 # 蓄積し、週報・メンバー別ダッシュボードで概算滞在時間として集計する。
 #
-# 【重要】20分間隔は cron ではなく "1回のジョブの中" で作る。
-#   GitHub の schedule は短間隔（*/20 など）だと高負荷時にまるごと落とされ、
-#   実際に "*/20 * * * *" では3時間以上1度も発火しなかった。そこで cron は
-#   1時間に1回だけにし、そのジョブの中で 20分おきに複数回スナップショットを取る。
-#   これで「cronが72回/日ちゃんと発火すること」への依存が 24回/日 に下がり、
-#   1回発火すればその1時間ぶんの取りこぼしが無くなる。
-#   毎時7分という半端な時刻にしているのも、混雑する毎時0分を避けるため。
+# 【重要】このワークフローは cron に依存しない「自己継続チェーン」で回り続ける。
+#
+#   このリポジトリでは GitHub Actions の schedule が全く発火しない（"*/20 * * * *" で
+#   3時間39分・"7 * * * *" で4時間、いずれも発火0回）。そこで cron をやめ、
+#   次の2つを組み合わせて外部ホスティング無しで継続実行する。
+#
+#   1. 1回のジョブを約5時間走らせ、その中で20分おきに16回スナップショットを取る
+#      （GitHub-hosted runner のジョブ上限は6時間）
+#   2. ジョブの冒頭で workflow_dispatch API を叩いて "次の自分" を予約する
+#
+#   GITHUB_TOKEN で起こしたイベントは通常あらたな実行を作らないが、
+#   workflow_dispatch と repository_dispatch だけは例外として実行を作る
+#   （GitHub Changelog 2022-09-08）。そのため PAT を用意しなくてもチェーンが回る。
+#
+#   次の実行を「冒頭」で予約するのが肝。concurrency により後続は pending で待たされ、
+#   今の実行が異常終了しても即座に引き継がれる（チェーンが切れない）。
+#
+# 【止め方】
+#   - 一時停止: Variables に VC_SNAPSHOT_ENABLED=false を設定する。次の実行が開始直後に
+#     終了し、そこでチェーンが止まる（実行中のものは最大5時間走り切る）。
+#   - 即停止: Actions 画面でこのワークフローを Disable するか、実行中/待機中の run を Cancel する。
+#   - 再開: VC_SNAPSHOT_ENABLED を true（または削除）に戻し、Run workflow で1回手動起動する。
 #
 # 記録先は main ではなく専用のデータブランチ（vc-log）。main のコミット履歴・PR差分を
 # 汚さないように分けている。ブランチが無ければ初回実行時に空の orphan ブランチとして作られる。
 #
-# 実行間隔を変えるときは、Variables の VC_SNAPSHOT_INTERVAL_MIN（既定20）を変えること。
+# 間隔を変えるときは Variables の VC_SNAPSHOT_INTERVAL_MIN（既定20）を変える。
 # ジョブ内の待ち時間と週報側の概算計算の両方がこの値を見る。
 # 概算滞在時間 = 在室が観測された時間帯（間隔ぶんのバケット）の数 × 間隔。
+# 実行が重なって同じ時間帯が2回記録されても、集計側で二重計上されない。
 #
 # 注意: Public リポジトリのため Actions の実行時間は無料枠を消費しない。
 #
@@ -26,18 +42,26 @@ name: VC snapshot
 #   （公開ブランチに生のユーザーIDを残さないため必須。未設定だとジョブは失敗する）
 
 on:
-  schedule:
-    # 毎時7分（混雑する毎時0分を避ける）。20分間隔はジョブ内のループで作る。
-    - cron: "7 * * * *"
   workflow_dispatch:
     inputs:
+      chain:
+        description: "次の実行を自動で予約する（チェーンを継続する）。単発で試すときは false"
+        required: false
+        type: boolean
+        default: true
       snapshots:
-        description: "1回の実行で取るスナップショット数（省略時は3＝20分×3で1時間ぶん）"
+        description: "この実行で取るスナップショット数（省略時は16＝20分×16で約5時間）"
         required: false
         type: string
+  # 保険。このリポジトリでは現状まったく発火しないが、GitHub側が復旧したときに
+  # チェーンが切れていれば自動で復活する。重複して走っても concurrency と
+  # 集計側のバケット重複排除で害は無い。
+  schedule:
+    - cron: "7 */5 * * *"
 
 permissions:
   contents: write
+  actions: write # 次の実行を workflow_dispatch API で予約するために必要
 
 concurrency:
   group: vc-snapshot
@@ -49,19 +73,34 @@ env:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    # 次の毎時実行が来る前に必ず終わらせる（詰まったジョブが後続を待たせないように）
-    timeout-minutes: 55
+    # 20分×15回の待ち＝300分。取得処理と後片付けを足しても収まる値にし、
+    # 万一ハングしても6時間上限より手前で終わらせる。
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install "discord.py>=2.4.0" "python-dotenv>=1.0.1"
+      - name: Check kill switch
+        id: killswitch
+        env:
+          ENABLED: ${{ vars.VC_SNAPSHOT_ENABLED }}
+          # schedule 実行では inputs が無いため空文字になる（＝チェーン継続）
+          CHAIN_INPUT: ${{ inputs.chain }}
+        run: |
+          if [ "$ENABLED" = "false" ]; then
+            echo "::notice::VC_SNAPSHOT_ENABLED=false のため、見回りと次回予約を行わずに終了します。"
+            echo "stop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stop=false" >> "$GITHUB_OUTPUT"
+          fi
+          # 明示的に false を渡された単発実行のときだけチェーンを継続しない
+          if [ "$CHAIN_INPUT" = "false" ]; then
+            echo "chain=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "chain=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check VC hash secret
+        if: steps.killswitch.outputs.stop != 'true'
         env:
           VC_HASH_SECRET: ${{ secrets.VC_HASH_SECRET }}
         run: |
@@ -70,7 +109,39 @@ jobs:
             exit 1
           fi
 
+      # 見回りを始める前に次の実行を予約する。concurrency で pending のまま待機し、
+      # この実行が落ちても即座に引き継がれるので、チェーンが切れにくい。
+      - name: Queue next run
+        if: steps.killswitch.outputs.stop != 'true' && steps.killswitch.outputs.chain == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/dispatch.log -w '%{http_code}' -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/vc-snapshot.yml/dispatches" \
+            -d "{\"ref\":\"$DEFAULT_BRANCH\"}")
+          if [ "$code" != "204" ]; then
+            echo "::error::次回実行の予約に失敗しました（HTTP $code）。このままではチェーンが途切れます。"
+            cat /tmp/dispatch.log
+            exit 1
+          fi
+          echo "次の実行を予約しました（この実行の終了後に開始されます）。"
+
+      - uses: actions/setup-python@v5
+        if: steps.killswitch.outputs.stop != 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        if: steps.killswitch.outputs.stop != 'true'
+        run: pip install "discord.py>=2.4.0" "python-dotenv>=1.0.1"
+
       - name: Prepare VC log branch
+        if: steps.killswitch.outputs.stop != 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -86,18 +157,20 @@ jobs:
           fi
 
       - name: Take VC snapshots
+        if: steps.killswitch.outputs.stop != 'true'
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           GUILD_ID: ${{ secrets.GUILD_ID }}
           VC_HASH_SECRET: ${{ secrets.VC_HASH_SECRET }}
           VC_CSV_PATH: vc-log/vc_history.csv
-          SNAPSHOTS: ${{ inputs.snapshots || '3' }}
+          # 20分間隔なら16回で約5時間ぶん（ジョブ上限6時間に対して余裕を持たせる）
+          SNAPSHOTS: ${{ inputs.snapshots || '16' }}
           INTERVAL_MIN: ${{ vars.VC_SNAPSHOT_INTERVAL_MIN || '20' }}
         run: |
           # 途中の1回が失敗しても残りの見回りは続ける（-e は付けない）
           set -uo pipefail
           for i in $(seq 1 "$SNAPSHOTS"); do
-            echo "::group::スナップショット $i/$SNAPSHOTS"
+            echo "::group::スナップショット $i/$SNAPSHOTS （$(date -u '+%H:%M:%S') UTC）"
             if python vc_snapshot.py; then
               (
                 cd vc-log

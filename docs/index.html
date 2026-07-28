@@ -269,6 +269,12 @@
   </div>
 
   <section class="card">
+    <h2>ボイスチャットの盛り上がり（直近1週間・延べ滞在時間）</h2>
+    <div id="vc"></div>
+    <div class="empty" id="vcNote"></div>
+  </section>
+
+  <section class="card">
     <h2>イベント</h2>
     <ul class="events" id="events"></ul>
   </section>
@@ -526,10 +532,10 @@ async function main() {
   tabTable.onclick = () => { tabTable.classList.add("on"); tabChart.classList.remove("on"); tableBox.classList.remove("hidden"); chartBox.classList.add("hidden"); };
 
   // チャンネル/スレッドの盛り上がり: 横棒グラフ（単一系列＝青一色、凡例不要）
-  function rankBarChart(containerId, canvasId, items, labelFn, tickFn) {
+  function rankBarChart(containerId, canvasId, items, labelFn, tickFn, emptyText) {
     const el = document.getElementById(containerId);
     if (!items.length) {
-      el.innerHTML = `<div class="empty">対象期間に投稿はありませんでした。</div>`;
+      el.innerHTML = `<div class="empty">${emptyText || "対象期間に投稿はありませんでした。"}</div>`;
       return;
     }
     const h = items.length * 44 + 40;
@@ -590,6 +596,27 @@ async function main() {
   // スレッドは目盛りにスレッド名のみ表示し、親チャンネルはツールチップ（フル名称）で確認
   rankBarChart("channels", "chChart", data.channels_top || [], c => "#" + c.name);
   rankBarChart("threads", "thChart", data.threads_top || [], t => `${t.channel} › ${t.name}`, t => t.name);
+
+  // ボイスチャット: バーの値は延べ滞在時間（分）。定期スナップショットからの概算。
+  (function () {
+    const vc = data.vc || {};
+    const items = vc.channels_top || [];
+    rankBarChart(
+      "vc", "vcChart", items,
+      c => `🔊 ${c.name}（${fmt(c.count)}分・${fmt(c.unique_users)}人）`,
+      c => c.name,
+      vc.available
+        ? "対象期間中、VCの利用は記録されませんでした。"
+        : "VCの在室スナップショットがまだ記録されていません（vc-snapshot ワークフローの設定が必要です）。",
+    );
+    const notes = [`${vc.interval_min || 20}分毎の在室スナップショットからの概算です（実測値ではありません）。`];
+    if (vc.available) {
+      notes.unshift(`対象期間の合計: 延べ${fmt(vc.total_minutes || 0)}分・ユニーク参加者${fmt(vc.unique_users || 0)}人。`);
+    }
+    if (vc.since) notes.push(`収集開始: ${vc.since}。それ以前の期間は記録がありません。`);
+    notes.push("対象はDHUmember（「閲覧権限」ロール保持者）のみで、運営・Bot・AFKチャンネルは含みません。");
+    document.getElementById("vcNote").innerHTML = notes.map(n => "※ " + n).join("<br>");
+  })();
 
   // 盛り上がりの推移（チャンネル・スレッド別、プルダウンで複数選択）
   (function () {

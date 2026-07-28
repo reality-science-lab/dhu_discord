@@ -11,6 +11,7 @@ from metrics import METRIC_COLUMNS, METRIC_LABELS_JA
 MAX_MESSAGES_IN_PROMPT = 800
 TOP_CHANNELS = 5  # チャンネルの盛り上がり上位表示数（3〜5）
 TOP_THREADS = 5  # スレッドの盛り上がり上位表示数
+TOP_VC_CHANNELS = 5  # ボイスチャンネルの盛り上がり上位表示数
 
 
 def _extract_text(message: Message) -> str:
@@ -96,6 +97,22 @@ def _thread_top_block(data: CollectedData, top_n: int = TOP_THREADS) -> str:
     return "\n".join(f"- {channel} › {thread}: {count}件" for channel, thread, count in ranked)
 
 
+def _vc_block(data: CollectedData, top_n: int = TOP_VC_CHANNELS) -> str:
+    if not data.vc_available:
+        return "（VCの在室スナップショットがまだ記録されていません）"
+    if not data.vc_channels:
+        return "（対象期間中、VCの利用は記録されませんでした）"
+    lines = [
+        f"- {c.name}: 延べ{c.minutes}分, ユニーク参加者{c.unique_users}人"
+        for c in data.vc_channels[:top_n]
+    ]
+    lines.append(
+        f"（対象期間の合計: 延べ{data.vc_total_minutes}分・ユニーク参加者{data.vc_unique_users}人／"
+        f"{data.vc_interval_min}分毎の在室スナップショットからの概算）"
+    )
+    return "\n".join(lines)
+
+
 def _weekly_trend_block(history: pd.DataFrame, weeks: int = 8) -> str:
     if history is None or history.empty:
         return "（推移データがまだありません）"
@@ -159,6 +176,9 @@ def generate_weekly_report(
 # 2b. スレッドの盛り上がり（公開チャンネル・掲示板配下のスレッド単位・投稿数・多い順）
 {_thread_top_block(data)}
 
+# 2c. ボイスチャットの盛り上がり（VCチャンネル別・対象期間・延べ滞在時間の多い順）
+{_vc_block(data)}
+
 # 3. 登録イベント（立ち上がり・実施状況）
 {_events_block(config, data)}
 
@@ -173,13 +193,17 @@ def generate_weekly_report(
 ## チャンネル・掲示板の盛り上がり
 - 投稿数の多い上位3〜5チャンネル（公開チャンネル・掲示板）を挙げ、各チャンネルで何が話題だったかをメッセージ履歴を根拠に1〜2行で要約する
 - 「スレッドの盛り上がり」に特に投稿数の多いスレッドがあれば、どのチャンネル/掲示板の何というスレッドかを明記して触れる
+## ボイスチャットの盛り上がり
+- 上記「ボイスチャットの盛り上がり」をもとに、延べ滞在時間の多いVCチャンネルと、ユニーク参加者数に触れる
+- 記録が無い場合は、その旨（まだ収集が始まっていない／対象期間に利用が無かった）を1行で述べる
 ## イベント
 - 上記「登録イベント」をもとに、対象期間に立ち上がったイベントと、各イベントの実施状況（開催予定/開催中/終了など）をまとめる
 - 該当が無ければ「対象期間に新規イベントはありませんでした」とする
 
 制約:
 - 与えられたデータに無い数値・イベント・チャンネルを創作しないこと
-- ボイスチャットについては本レポートの対象外"""
+- ボイスチャットの数値は{data.vc_interval_min}分毎の在室スナップショットからの概算であり、実測値ではないことを明記する
+- ボイスチャットの集計対象はDHUmember（「閲覧権限」ロール保持者）のみで、運営・Botは含まれない"""
 
     message = client.messages.create(
         model=config.sonnet_model,

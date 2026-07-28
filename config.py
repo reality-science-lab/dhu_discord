@@ -54,3 +54,14 @@ class Config:
     member_activity_days: int = field(
         default_factory=lambda: int(os.environ.get("MEMBER_ACTIVITY_DAYS", "7"))
     )
+    # VC在室スナップショットの履歴CSV（vc_snapshot.py が追記）。週報ワークフローでは
+    # データ用ブランチをチェックアウトしたディレクトリを指す。
+    vc_csv_path: str = field(default_factory=lambda: os.environ.get("VC_CSV_PATH", "vc_history.csv"))
+    # スナップショットの実行間隔（分）。概算滞在時間 = 在室スナップショット数 × この値。
+    # .github/workflows/vc-snapshot.yml の cron と必ず揃えること。
+    vc_snapshot_interval_min: int = field(
+        default_factory=lambda: int(os.environ.get("VC_SNAPSHOT_INTERVAL_MIN", "20"))
+    )
+    # 在室者IDを仮名化する HMAC の鍵。スナップショットと週報で同じ値を使う
+    # （週報側で未設定だと仮名をメンバーに紐付けられず、VC実績は空になる）。
+    vc_hash_secret: str = field(default_factory=lambda: os.environ.get("VC_HASH_SECRET", ""))

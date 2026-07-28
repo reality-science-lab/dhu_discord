@@ -24,6 +24,7 @@ ENC_FILENAME = "data.enc"  # DASHBOARD_PASSWORD 設定時の暗号化データ
 KDF_ITERATIONS = 310_000
 TOP_CHANNELS = 5
 TOP_THREADS = 5
+TOP_VC_CHANNELS = 5
 ACTIVITY_EXPORT_DAYS = 120  # 推移グラフとしてエクスポートする日数の上限
 
 
@@ -67,13 +68,14 @@ def _kpis(history: pd.DataFrame, last_day) -> list[dict]:
     return kpis
 
 
-MEMBER_METRIC_KEYS = ["chars", "posts", "mentions_out", "mentions_in", "event_interest"]
+MEMBER_METRIC_KEYS = ["chars", "posts", "mentions_out", "mentions_in", "vc_minutes", "event_interest"]
 
 MEMBER_METRIC_LABELS_JA = {
     "chars": "発言文字数",
     "posts": "投稿数",
     "mentions_out": "メンション数",
     "mentions_in": "被メンション数",
+    "vc_minutes": "VC参加時間",
     "event_interest": "イベントへの興味",
 }
 
@@ -82,6 +84,11 @@ MEMBER_METRIC_DEFS_JA = {
     "posts": "集計期間中の投稿メッセージ数。",
     "mentions_out": "本人の投稿に含まれる他ユーザーへの@メンションの合計数。",
     "mentions_in": "他のメンバーの投稿で@メンションされた回数。",
+    "vc_minutes": (
+        "ボイスチャンネルの滞在時間（分）の概算。Discord APIでは過去のVC履歴を取得できないため、"
+        "定期的に在室者を記録するスナップショットの回数×実行間隔で見積もった値であり、"
+        "実測値ではない（AFKチャンネルは除外）。"
+    ),
     "event_interest": (
         "サーバーのスケジュールイベントに「興味あり」を付けた数。終了・削除済みイベントは"
         "Discord APIから消えるため、現在登録されているイベントのみが対象。"
@@ -105,6 +112,7 @@ def _members_payload(config: Config, data: CollectedData) -> dict:
             "posts": st.posts,
             "mentions_out": st.mentions_out,
             "mentions_in": st.mentions_in,
+            "vc_minutes": st.vc_minutes,
             "event_interest": st.event_interest,
         }
         for st in data.member_stats.values()
@@ -241,6 +249,19 @@ def write_dashboard_data(
         reverse=True,
     )[:TOP_THREADS]
 
+    # ボイスチャットの盛り上がり。count は延べ滞在時間（分）で、盛り上がりの横棒と同じ形にする。
+    vc = {
+        "available": data.vc_available,
+        "interval_min": data.vc_interval_min,
+        "total_minutes": data.vc_total_minutes,
+        "unique_users": data.vc_unique_users,
+        "since": data.vc_first_seen.astimezone(tz).date().isoformat() if data.vc_first_seen else None,
+        "channels_top": [
+            {"name": c.name, "count": c.minutes, "unique_users": c.unique_users}
+            for c in data.vc_channels[:TOP_VC_CHANNELS]
+        ],
+    }
+
     events = [
         {
             "name": ev.name,
@@ -265,6 +286,7 @@ def write_dashboard_data(
         "history": history[["date", *METRIC_COLUMNS]].to_dict(orient="records"),
         "channels_top": channels_top,
         "threads_top": threads_top,
+        "vc": vc,
         # 盛り上がりの推移（日別）と、デフォルト表示する系列（＝週報で言及される上位チャンネル）
         "activity": _activity_payload(activity),
         "activity_defaults": [{"kind": "channel", "name": c["name"]} for c in channels_top],

@@ -8,6 +8,7 @@ from config import Config
 from dashboard import write_dashboard_data
 from metrics import append_activity, append_metrics, render_activity_graph, render_graph
 from reporter import generate_weekly_report
+from vc import attach_vc_stats
 
 
 def _parse_args() -> argparse.Namespace:
@@ -85,6 +86,8 @@ def main() -> None:
     )
 
     data = run_collect(config, since, until, analysis_since, member_since)
+    # VC実績は定期スナップショットのCSVから合流させる（Discord APIでは遡れないため）
+    attach_vc_stats(config, data)
 
     history = append_metrics(config, data)
     activity = append_activity(config, data)
@@ -112,6 +115,14 @@ def main() -> None:
         f"メンバー別集計: {member_since.astimezone(tz).date()} 〜 {last_day}"
         f"（{config.member_activity_days}日間・{len(data.member_stats)}人）"
     )
+    if data.vc_available:
+        print(
+            f"VC実績: {config.vc_csv_path} から集計（延べ{data.vc_total_minutes}分・"
+            f"{data.vc_unique_users}人・{len(data.vc_channels)}チャンネル／"
+            f"{config.vc_snapshot_interval_min}分間隔の概算）"
+        )
+    else:
+        print(f"VC実績: 履歴がないためスキップしました（{config.vc_csv_path}）")
     print(f"指標CSVを更新しました: {config.metrics_csv_path}（{len(data.daily_metrics)}日分）")
     print(f"グラフを更新しました: {config.metrics_graph_path}")
     print(f"盛り上がりグラフを更新しました: {config.activity_graph_path}")

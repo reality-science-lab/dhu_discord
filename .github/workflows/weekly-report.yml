@@ -3,10 +3,14 @@ name: Weekly community report
 # オンデマンド（手動）で週報を生成する。定期スケジュールはしない。
 # 対象期間は「生成日から遡って1週間」（既定）。since/until で明示指定も可能。
 #
+# VC実績は vc-snapshot ワークフローが vc-log ブランチへ蓄積した在室スナップショットを読む。
+#
 # 必要な設定:
 #   - Secrets:   DISCORD_TOKEN, ANTHROPIC_API_KEY, GUILD_ID, INTRO_CHANNEL_ID,
-#                DASHBOARD_PASSWORD（ダッシュボード閲覧パスワード）
-#   - (任意) Variables: EXCLUDE_CHANNEL_IDS
+#                DASHBOARD_PASSWORD（ダッシュボード閲覧パスワード）,
+#                VC_HASH_SECRET（VC在室ログの仮名化キー。vc-snapshot と同じ値）
+#   - (任意) Variables: EXCLUDE_CHANNEL_IDS,
+#                VC_SNAPSHOT_INTERVAL_MIN（vc-snapshot.yml の cron と揃える。既定20）
 
 on:
   workflow_dispatch:
@@ -36,6 +40,9 @@ concurrency:
   group: weekly-report
   cancel-in-progress: false
 
+env:
+  VC_LOG_BRANCH: vc-log
+
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -61,6 +68,15 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch VC snapshot history
+        run: |
+          # VC在室ログはデータ専用ブランチにあるので、読み取り用に worktree として展開する
+          if git fetch --depth=1 origin "$VC_LOG_BRANCH"; then
+            git worktree add --detach vc-log FETCH_HEAD
+          else
+            echo "::notice::${VC_LOG_BRANCH} ブランチがまだありません。VC実績は空のまま生成します。"
+          fi
+
       - name: Generate weekly report
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
@@ -71,6 +87,9 @@ jobs:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
           TIMEZONE: Asia/Tokyo
           MEMBER_ACTIVITY_DAYS: ${{ inputs.member_days || '7' }}
+          VC_CSV_PATH: vc-log/vc_history.csv
+          VC_HASH_SECRET: ${{ secrets.VC_HASH_SECRET }}
+          VC_SNAPSHOT_INTERVAL_MIN: ${{ vars.VC_SNAPSHOT_INTERVAL_MIN || '20' }}
         run: |
           python main.py --weekly \
             ${{ inputs.since && format('--since {0}', inputs.since) || '' }} \

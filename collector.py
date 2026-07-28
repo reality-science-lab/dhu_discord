@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config import Config
+from vc import VcChannelStat
 
 
 @dataclass
@@ -38,6 +39,7 @@ class MemberStats:
     mentions_out: int = 0  # 本人が他ユーザーへ付けたメンション数
     mentions_in: int = 0  # 他ユーザーから受けたメンション数（被メンション）
     event_interest: int = 0  # 「興味あり」を付けたイベント数（現存イベントのみ）
+    vc_minutes: int = 0  # VC滞在時間の概算（分）。vc.attach_vc_stats が埋める
 
 
 @dataclass
@@ -80,6 +82,13 @@ class CollectedData:
     # メンバー別集計（Bot除く在籍メンバー全員。活動ゼロでも行を持つ）
     member_stats: dict[int, MemberStats] = field(default_factory=dict)
     member_window_start: datetime | None = None
+    # ボイスチャット（定期スナップショットからの概算。vc.attach_vc_stats が埋める）
+    vc_available: bool = False  # 履歴CSVを読めて集計できたか
+    vc_interval_min: int = 0  # スナップショット間隔（分）
+    vc_channels: list[VcChannelStat] = field(default_factory=list)  # 分析期間のチャンネル別
+    vc_total_minutes: int = 0  # 分析期間の延べ滞在時間（人×分）
+    vc_unique_users: int = 0  # 分析期間に一度でもVCに入ったユニーク人数
+    vc_first_seen: datetime | None = None  # 履歴の最初の記録時刻（収集開始日の表示用）
 
 
 def _day_key(dt: datetime, tz) -> str:

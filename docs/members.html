@@ -232,7 +232,7 @@ async function main() {
   const colorOf = (k) => palette[keys.indexOf(k) % palette.length];
 
   // 値の単位（ツールチップ表示用）
-  const unitOf = { chars: "字", posts: "件", mentions_out: "回", mentions_in: "回", event_interest: "件" };
+  const unitOf = { chars: "字", posts: "件", mentions_out: "回", mentions_in: "回", vc_minutes: "分", event_interest: "件" };
 
   // 正規化: 指標ごとに全メンバー中の最大値で 0〜1 に割る。
   // バーの長さ＝正規化値の合計（＝どの指標も同じ重みの総合スコア）。
@@ -378,6 +378,7 @@ async function main() {
     "バーの長さは、各指標を全メンバー中の最大値で正規化（0〜1）して積み上げた総合スコアです（指標間の単位の違いを吸収するため）。",
     "並び順は総合スコアの高い順です。",
     "「イベントへの興味」は現在登録されているイベントが対象です（終了・削除済みイベントはDiscord APIから取得できません）。",
+    "「VC参加時間」は定期的な在室スナップショットからの概算です（実測値ではありません）。スナップショット運用の開始前の期間は0になります。",
   ];
   document.getElementById("notes").innerHTML = notes.map(n => "※ " + n).join("<br>");
 

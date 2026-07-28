@@ -1,0 +1,95 @@
+name: VC snapshot
+
+# ボイスチャンネル在室者の定期スナップショット（「見回り」）。
+# DiscordのAPIには過去のVC履歴が無いため、20分毎に「その瞬間の在室者」を記録して
+# 蓄積し、週報・メンバー別ダッシュボードで概算滞在時間として集計する。
+#
+# 記録先は main ではなく専用のデータブランチ（vc-log）。72コミット/日 になるため、
+# main のコミット履歴・PR差分を汚さないように分けている。ブランチが無ければ初回実行時に
+# 空の orphan ブランチとして作られる。
+#
+# 実行間隔を変えるときは、下の cron と週報側の VC_SNAPSHOT_INTERVAL_MIN
+# （Variables、既定20）を必ず揃えること。概算滞在時間 = 在室スナップショット数 × 間隔。
+#
+# 注意:
+#  - Public リポジトリのため Actions の実行時間は無料枠を消費しない。
+#  - GitHub の schedule は高負荷時に遅延・スキップされることがあり、20分間隔は保証されない。
+#    欠測した回のぶんは概算滞在時間が少なめに出る。
+#
+# 必要な設定: Secrets に DISCORD_TOKEN / GUILD_ID / VC_HASH_SECRET
+#   VC_HASH_SECRET は在室者IDを仮名化するHMACの鍵。週報ワークフローにも同じ値が必要。
+#   （公開ブランチに生のユーザーIDを残さないため必須。未設定だとジョブは失敗する）
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vc-snapshot
+  cancel-in-progress: false
+
+env:
+  VC_LOG_BRANCH: vc-log
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install "discord.py>=2.4.0" "python-dotenv>=1.0.1"
+
+      - name: Prepare VC log branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # worktree は親チェックアウトの認証情報を共有するので、そのまま push できる
+          if git fetch --depth=1 origin "$VC_LOG_BRANCH"; then
+            git worktree add --detach vc-log FETCH_HEAD
+            git -C vc-log switch -c "$VC_LOG_BRANCH"
+          else
+            echo "$VC_LOG_BRANCH ブランチが無いため、新規に作成します。"
+            git worktree add --detach vc-log
+            git -C vc-log switch --orphan "$VC_LOG_BRANCH"
+          fi
+
+      - name: Take VC snapshot
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
+          VC_HASH_SECRET: ${{ secrets.VC_HASH_SECRET }}
+          VC_CSV_PATH: vc-log/vc_history.csv
+        run: python vc_snapshot.py
+
+      - name: Commit snapshot
+        working-directory: vc-log
+        run: |
+          set -euo pipefail
+          if [ ! -f vc_history.csv ]; then
+            echo "在室者がいないため（履歴ファイルが未作成）コミットをスキップします。"
+            exit 0
+          fi
+          git add vc_history.csv
+          if git diff --cached --quiet; then
+            echo "在室者がいないためコミットをスキップします。"
+            exit 0
+          fi
+          git commit -m "Record VC snapshot"
+          # 手動実行と定期実行が重なった場合に備えて rebase して再試行する
+          for _ in 1 2 3; do
+            if git push origin "$VC_LOG_BRANCH"; then
+              exit 0
+            fi
+            git pull --rebase origin "$VC_LOG_BRANCH"
+          done
+          git push origin "$VC_LOG_BRANCH"
